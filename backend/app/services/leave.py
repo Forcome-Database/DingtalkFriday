@@ -73,6 +73,78 @@ async def _get_descendant_dept_ids(session: AsyncSession, dept_id: int) -> Set[i
     return result
 
 
+# 按自然日计算的假期类型关键词（产假、婚假等，包含周末和节假日）
+CALENDAR_DAY_LEAVE_KEYWORDS = ("产假", "婚假")
+
+
+def _is_calendar_day_leave(leave_type: Optional[str]) -> bool:
+    """判断是否为按自然日计算的假期类型（产假、婚假等）。"""
+    if not leave_type:
+        return False
+    return any(kw in leave_type for kw in CALENDAR_DAY_LEAVE_KEYWORDS)
+
+
+def _count_workdays(start_date: date_type, end_date: date_type) -> int:
+    """计算日期范围 [start_date, end_date] 内的工作日数量。"""
+    count = 0
+    current = start_date
+    while current <= end_date:
+        if _is_workday(current):
+            count += 1
+        current += timedelta(days=1)
+    return count
+
+
+def _prorate_duration(
+    rec,
+    period_start_date: date_type,
+    period_end_date: date_type,
+    type_map: Dict[str, "LeaveType"],
+    unit: str = "day",
+) -> float:
+    """
+    按比例计算请假记录在指定时间段内的实际时长。
+
+    普通假期按工作日比例分摊，产假/婚假按自然日比例分摊。
+    如果记录完全在 period 内则返回全部时长。
+    """
+    rec_start = _ms_to_datetime(rec.start_time).date()
+    rec_end = _ms_to_datetime(rec.end_time).date()
+
+    # 记录与 period 的交集
+    overlap_start = max(rec_start, period_start_date)
+    overlap_end = min(rec_end, period_end_date)
+
+    if overlap_start > overlap_end:
+        return 0.0
+
+    # 如果记录完全在 period 内，无需分摊
+    if rec_start >= period_start_date and rec_end <= period_end_date:
+        hpd = 800
+        if rec.leave_code and rec.leave_code in type_map:
+            hpd = type_map[rec.leave_code].hours_in_per_day or 800
+        return _convert_duration(rec.duration_percent, rec.duration_unit, unit, hpd)
+
+    hpd = 800
+    if rec.leave_code and rec.leave_code in type_map:
+        hpd = type_map[rec.leave_code].hours_in_per_day or 800
+    full_value = _convert_duration(rec.duration_percent, rec.duration_unit, unit, hpd)
+
+    # 产假/婚假按自然日比例分摊，其他假期按工作日比例分摊
+    if _is_calendar_day_leave(rec.leave_type):
+        total_days = (rec_end - rec_start).days + 1
+        period_days = (overlap_end - overlap_start).days + 1
+        if total_days == 0:
+            return 0.0
+        return full_value * (period_days / total_days)
+    else:
+        total_workdays = _count_workdays(rec_start, rec_end)
+        if total_workdays == 0:
+            return 0.0
+        period_workdays = _count_workdays(overlap_start, overlap_end)
+        return full_value * (period_workdays / total_workdays)
+
+
 async def _get_leave_type_map() -> Dict[str, LeaveType]:
     """Load all leave types into a dict keyed by leave_code."""
     async with async_session() as session:
@@ -169,10 +241,10 @@ async def get_monthly_summary(
         if not emp_userids:
             return _empty_response(page, page_size)
 
-        # ---- Load leave records for the year ----
+        # ---- Load leave records (overlap query: records that intersect the year) ----
         lr_conditions = [
-            LeaveRecord.start_time >= year_start_ms,
             LeaveRecord.start_time <= year_end_ms,
+            LeaveRecord.end_time >= year_start_ms,
             LeaveRecord.userid.in_(emp_userids),
         ]
         if leave_types:
@@ -182,7 +254,7 @@ async def get_monthly_summary(
         lr_result = await session.execute(lr_query)
         records = lr_result.scalars().all()
 
-    # ---- Aggregate per employee per month ----
+    # ---- Aggregate per employee per month (with proration) ----
     # { userid: { month(1-12): total_value } }
     emp_monthly: Dict[str, Dict[int, float]] = {}
     total_count = 0  # total person-times (record count)
@@ -194,28 +266,26 @@ async def get_monthly_summary(
         if uid not in emp_userids:
             continue
 
-        # Determine month from start_time
-        dt = _ms_to_datetime(rec.start_time)
-        month = dt.month
-
-        # Look up hours_in_per_day from leave type
-        hpd = 800
-        if rec.leave_code and rec.leave_code in type_map:
-            hpd = type_map[rec.leave_code].hours_in_per_day or 800
-
-        value = _convert_duration(rec.duration_percent, rec.duration_unit, unit, hpd)
-
-        if uid not in emp_monthly:
-            emp_monthly[uid] = {}
-        emp_monthly[uid][month] = emp_monthly[uid].get(month, 0.0) + value
-
         total_count += 1
 
-        # Compute stats in the requested unit
-        total_days_all += value
+        # Prorate into each month of the year
+        for month in range(1, 13):
+            _, last_day = calendar.monthrange(year, month)
+            m_start = date_type(year, month, 1)
+            m_end = date_type(year, month, last_day)
 
-        if rec.leave_type and "年假" in rec.leave_type:
-            annual_days_all += value
+            value = _prorate_duration(rec, m_start, m_end, type_map, unit)
+            if value <= 0:
+                continue
+
+            if uid not in emp_monthly:
+                emp_monthly[uid] = {}
+            emp_monthly[uid][month] = emp_monthly[uid].get(month, 0.0) + value
+
+            total_days_all += value
+
+            if rec.leave_type and "年假" in rec.leave_type:
+                annual_days_all += value
 
     # ---- Build row list ----
     rows = []
@@ -376,30 +446,32 @@ async def get_daily_detail(
         start_dt = _ms_to_datetime(rec.start_time)
         end_dt = _ms_to_datetime(rec.end_time)
 
-        # Look up hours_in_per_day for unit conversion
-        hpd = 800
-        if rec.leave_code and rec.leave_code in type_map:
-            hpd = type_map[rec.leave_code].hours_in_per_day or 800
-
-        hours = _convert_duration(rec.duration_percent, rec.duration_unit, "hour", hpd)
-        days = _convert_duration(rec.duration_percent, rec.duration_unit, "day", hpd)
+        # 按月边界分摊：只计入落在当月的部分
+        days = _prorate_duration(rec, month_start_date, month_end_date, type_map, "day")
+        hours = _prorate_duration(rec, month_start_date, month_end_date, type_map, "hour")
 
         total_days += days
         total_hours += hours
 
+        # Look up hours_in_per_day for per-day expansion
+        hpd = 800
+        if rec.leave_code and rec.leave_code in type_map:
+            hpd = type_map[rec.leave_code].hours_in_per_day or 800
+
         # Expand multi-day records into per-day entries
         rec_start_date = start_dt.date()
         rec_end_date = end_dt.date()
+        calendar_day_leave = _is_calendar_day_leave(rec.leave_type)
 
-        # 计算请假时间段内的工作日数
-        workday_count = 0
-        tmp = rec_start_date
-        while tmp <= rec_end_date:
-            if _is_workday(tmp):
-                workday_count += 1
-            tmp += timedelta(days=1)
-
-        hours_per_day = round(hours / workday_count, 1) if workday_count > 0 else round(hours, 1)
+        # 计算每日小时数（用整条记录的完整时长来算每天份额）
+        if calendar_day_leave:
+            # 产假/婚假: 按自然日计算，每天8小时
+            hours_per_day = 8.0
+        else:
+            # 普通假期: 用整条记录的完整小时数 / 总工作日数
+            full_hours = _convert_duration(rec.duration_percent, rec.duration_unit, "hour", hpd)
+            workday_count = _count_workdays(rec_start_date, rec_end_date)
+            hours_per_day = round(full_hours / workday_count, 1) if workday_count > 0 else round(full_hours, 1)
 
         # Clamp to current month boundaries
         day_from = max(rec_start_date, month_start_date)
@@ -407,9 +479,10 @@ async def get_daily_detail(
 
         current = day_from
         while current <= day_to:
-            if not _is_workday(current):
+            # 产假/婚假不跳过非工作日，其他假期跳过
+            if not calendar_day_leave and not _is_workday(current):
                 current += timedelta(days=1)
-                continue  # 跳过非工作日
+                continue
 
             if current == rec_start_date:
                 start_time_str = start_dt.strftime("%H:%M")
@@ -532,9 +605,12 @@ async def get_daily_leave_count(
         emp_dept = emp.dept_name or "" if emp else ""
         leave_type_name = rec.leave_type or "请假"
 
+        calendar_day_leave = _is_calendar_day_leave(leave_type_name)
+
         current = day_from
         while current <= day_to:
-            if _is_workday(current):  # 只在工作日统计
+            # 产假/婚假不跳过非工作日，其他假期只在工作日统计
+            if calendar_day_leave or _is_workday(current):
                 if current not in day_users:
                     day_users[current] = {}
                 # Use userid as key to deduplicate (same person, same day)

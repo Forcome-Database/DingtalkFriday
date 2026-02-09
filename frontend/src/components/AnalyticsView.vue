@@ -90,13 +90,26 @@ const pieTotal = computed(() => {
 // --- Chart rendering functions ---
 
 /**
+ * Ensure an ECharts instance is valid for the given DOM ref.
+ * If the DOM container changed (e.g., after v-if toggle), dispose old instance and re-init.
+ */
+function ensureChartInstance(instance, domRef) {
+  if (instance && instance.getDom() !== domRef.value) {
+    instance.dispose()
+    instance = null
+  }
+  if (!instance) {
+    instance = echarts.init(domRef.value)
+  }
+  return instance
+}
+
+/**
  * Render the monthly trend line chart.
  */
 function renderTrendChart() {
   if (!trendChartRef.value) return
-  if (!trendChart) {
-    trendChart = echarts.init(trendChartRef.value)
-  }
+  trendChart = ensureChartInstance(trendChart, trendChartRef)
 
   const data = monthlyTrend.value
   const currentData = data?.currentYear?.map(i => i.days) || Array(12).fill(0)
@@ -180,9 +193,7 @@ function renderTrendChart() {
  */
 function renderPieChart() {
   if (!pieChartRef.value) return
-  if (!pieChart) {
-    pieChart = echarts.init(pieChartRef.value)
-  }
+  pieChart = ensureChartInstance(pieChart, pieChartRef)
 
   const raw = leaveTypeDistribution.value
   const data = raw?.items || []
@@ -201,6 +212,7 @@ function renderPieChart() {
     },
     graphic: [
       {
+        id: 'pie-total-value',
         type: 'text',
         left: 'center',
         top: '42%',
@@ -213,6 +225,7 @@ function renderPieChart() {
         }
       },
       {
+        id: 'pie-total-label',
         type: 'text',
         left: 'center',
         top: '55%',
@@ -247,9 +260,7 @@ function renderPieChart() {
  */
 function renderDeptChart() {
   if (!deptChartRef.value) return
-  if (!deptChart) {
-    deptChart = echarts.init(deptChartRef.value)
-  }
+  deptChart = ensureChartInstance(deptChart, deptChartRef)
 
   const raw = departmentComparison.value
   const items = raw?.departments || []
@@ -343,9 +354,7 @@ function renderDeptChart() {
  */
 function renderWeekdayChart() {
   if (!weekdayChartRef.value) return
-  if (!weekdayChart) {
-    weekdayChart = echarts.init(weekdayChartRef.value)
-  }
+  weekdayChart = ensureChartInstance(weekdayChart, weekdayChartRef)
 
   const data = weekdayDistribution.value?.weekdays || []
   const weekdays = data.map(d => d.label)
@@ -411,9 +420,7 @@ function renderWeekdayChart() {
  */
 function renderRankingChart() {
   if (!rankingChartRef.value) return
-  if (!rankingChart) {
-    rankingChart = echarts.init(rankingChartRef.value)
-  }
+  rankingChart = ensureChartInstance(rankingChart, rankingChartRef)
 
   const data = employeeRanking.value?.employees || []
   // Reverse so top-ranked appears on top in horizontal bar
@@ -546,8 +553,6 @@ async function handleDeptMetricChange(metric) {
   deptMetric.value = metric
   try {
     departmentComparison.value = await apiClient.getDepartmentComparison(year.value, metric)
-    await nextTick()
-    renderDeptChart()
   } catch (err) {
     console.error('[Analytics] Failed to refresh department comparison:', err)
   }

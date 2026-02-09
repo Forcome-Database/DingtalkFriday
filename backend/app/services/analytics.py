@@ -9,6 +9,7 @@ Provides aggregation queries for dashboard analytics:
 - Employee leave ranking
 """
 
+import calendar
 import logging
 from collections import defaultdict
 from datetime import date as date_type, timedelta
@@ -21,10 +22,13 @@ from app.database import async_session
 from app.models import Employee, LeaveRecord, LeaveType
 from app.services.leave import (
     _convert_duration,
+    _count_workdays,
     _get_leave_type_map,
+    _is_calendar_day_leave,
     _is_workday,
     _month_range_ms,
     _ms_to_datetime,
+    _prorate_duration,
     _year_range_ms,
 )
 
@@ -39,13 +43,13 @@ async def _load_year_records(
     session: AsyncSession,
     year: int,
 ) -> List[LeaveRecord]:
-    """Load all leave records whose start_time falls within the given year."""
+    """Load all leave records that overlap with the given year (handles cross-year records)."""
     year_start_ms, year_end_ms = _year_range_ms(year)
     result = await session.execute(
         select(LeaveRecord).where(
             and_(
-                LeaveRecord.start_time >= year_start_ms,
                 LeaveRecord.start_time <= year_end_ms,
+                LeaveRecord.end_time >= year_start_ms,
             )
         )
     )
@@ -70,6 +74,7 @@ def _record_to_days(
 async def get_monthly_trend(year: int) -> dict:
     """
     Aggregate leave days per month for the given year and the previous year.
+    Cross-year/cross-month records are prorated by workday ratio.
 
     Returns:
         {
@@ -83,20 +88,23 @@ async def get_monthly_trend(year: int) -> dict:
         current_records = await _load_year_records(session, year)
         previous_records = await _load_year_records(session, year - 1)
 
-    def _aggregate_by_month(records: List[LeaveRecord]) -> List[dict]:
+    def _aggregate_by_month(records: List[LeaveRecord], target_year: int) -> List[dict]:
         monthly: Dict[int, float] = {m: 0.0 for m in range(1, 13)}
         for rec in records:
-            dt = _ms_to_datetime(rec.start_time)
-            days = _record_to_days(rec, type_map)
-            monthly[dt.month] += days
+            for m in range(1, 13):
+                _, last_day = calendar.monthrange(target_year, m)
+                m_start = date_type(target_year, m, 1)
+                m_end = date_type(target_year, m, last_day)
+                days = _prorate_duration(rec, m_start, m_end, type_map, "day")
+                monthly[m] += days
         return [
             {"month": m, "days": round(monthly[m], 1)}
             for m in range(1, 13)
         ]
 
     return {
-        "currentYear": _aggregate_by_month(current_records),
-        "previousYear": _aggregate_by_month(previous_records),
+        "currentYear": _aggregate_by_month(current_records, year),
+        "previousYear": _aggregate_by_month(previous_records, year - 1),
     }
 
 
@@ -107,6 +115,7 @@ async def get_monthly_trend(year: int) -> dict:
 async def get_leave_type_distribution(year: int) -> dict:
     """
     Aggregate leave days by leave type for the given year.
+    Cross-year records are prorated to the target year by workday ratio.
 
     Returns:
         {
@@ -118,6 +127,8 @@ async def get_leave_type_distribution(year: int) -> dict:
         }
     """
     type_map = await _get_leave_type_map()
+    year_start = date_type(year, 1, 1)
+    year_end = date_type(year, 12, 31)
 
     async with async_session() as session:
         records = await _load_year_records(session, year)
@@ -125,7 +136,7 @@ async def get_leave_type_distribution(year: int) -> dict:
     type_days: Dict[str, float] = defaultdict(float)
     for rec in records:
         leave_name = rec.leave_type or "请假"
-        days = _record_to_days(rec, type_map)
+        days = _prorate_duration(rec, year_start, year_end, type_map, "day")
         type_days[leave_name] += days
 
     total = sum(type_days.values())
@@ -166,6 +177,8 @@ async def get_department_comparison(year: int, metric: str = "total") -> dict:
         }
     """
     type_map = await _get_leave_type_map()
+    year_start = date_type(year, 1, 1)
+    year_end = date_type(year, 12, 31)
 
     async with async_session() as session:
         # Load all employees to build dept mapping and headcount
@@ -180,14 +193,14 @@ async def get_department_comparison(year: int, metric: str = "total") -> dict:
         dept_name = emp.dept_name or "未分配"
         dept_headcount[dept_name] += 1
 
-    # Aggregate leave days per department
+    # Aggregate leave days per department (prorated to target year)
     dept_days: Dict[str, float] = defaultdict(float)
     for rec in records:
         emp = emp_map.get(rec.userid)
         if not emp:
             continue
         dept_name = emp.dept_name or "未分配"
-        days = _record_to_days(rec, type_map)
+        days = _prorate_duration(rec, year_start, year_end, type_map, "day")
         dept_days[dept_name] += days
 
     # Build department list (include all departments that have employees)
@@ -244,19 +257,28 @@ async def get_weekday_distribution(year: int) -> dict:
             ]
         }
     """
+    year_start = date_type(year, 1, 1)
+    year_end = date_type(year, 12, 31)
+
     async with async_session() as session:
         records = await _load_year_records(session, year)
 
-    # Count occurrences per weekday (0=Mon .. 4=Fri)
+    # Count occurrences per weekday (0=Mon .. 4=Fri), clamped to target year
     weekday_counts: Dict[int, int] = {i: 0 for i in range(5)}
 
     for rec in records:
         start_date = _ms_to_datetime(rec.start_time).date()
         end_date = _ms_to_datetime(rec.end_time).date()
+        calendar_day_leave = _is_calendar_day_leave(rec.leave_type)
 
-        current = start_date
-        while current <= end_date:
-            if _is_workday(current):
+        # Clamp to year boundaries to avoid counting days outside target year
+        clamped_start = max(start_date, year_start)
+        clamped_end = min(end_date, year_end)
+
+        current = clamped_start
+        while current <= clamped_end:
+            # 产假/婚假按自然日统计（含周末节假日），其他假期只统计工作日
+            if calendar_day_leave or _is_workday(current):
                 wd = current.weekday()  # 0=Mon .. 4=Fri
                 if wd in weekday_counts:
                     weekday_counts[wd] += 1
@@ -302,6 +324,8 @@ async def get_employee_ranking(year: int, limit: int = 10) -> dict:
         }
     """
     type_map = await _get_leave_type_map()
+    year_start = date_type(year, 1, 1)
+    year_end = date_type(year, 12, 31)
 
     async with async_session() as session:
         emp_result = await session.execute(select(Employee))
@@ -310,7 +334,7 @@ async def get_employee_ranking(year: int, limit: int = 10) -> dict:
 
     emp_map = {e.userid: e for e in employees}
 
-    # { userid: { leave_type_name: total_days } }
+    # { userid: { leave_type_name: total_days } } (prorated to target year)
     emp_type_days: Dict[str, Dict[str, float]] = defaultdict(lambda: defaultdict(float))
 
     for rec in records:
@@ -318,7 +342,7 @@ async def get_employee_ranking(year: int, limit: int = 10) -> dict:
         if not emp:
             continue
         leave_name = rec.leave_type or "请假"
-        days = _record_to_days(rec, type_map)
+        days = _prorate_duration(rec, year_start, year_end, type_map, "day")
         emp_type_days[rec.userid][leave_name] += days
 
     # Build ranked list
