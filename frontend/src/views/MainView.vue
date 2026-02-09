@@ -115,7 +115,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="min-h-screen bg-white">
+  <div class="min-h-screen bg-white pb-16 sm:pb-0">
     <!-- Top navigation bar -->
     <AppHeader
       :syncing="syncing"

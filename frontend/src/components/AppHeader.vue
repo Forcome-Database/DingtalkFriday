@@ -1,52 +1,27 @@
 <script setup>
-import { CalendarDays, RefreshCw, Download, LogOut, Shield } from 'lucide-vue-next'
+import { CalendarDays, RefreshCw, Download, LogOut, Shield, FileSpreadsheet, BarChart3 } from 'lucide-vue-next'
 
 const props = defineProps({
-  /** Whether a sync operation is currently in progress */
-  syncing: {
-    type: Boolean,
-    default: false
-  },
-  /** Whether an export operation is currently in progress */
-  exporting: {
-    type: Boolean,
-    default: false
-  },
-  /** Year to display on sync button */
-  syncYear: {
-    type: Number,
-    default: new Date().getFullYear()
-  },
-  /** Currently active page: 'export', 'analytics', or 'admin' */
-  activePage: {
-    type: String,
-    default: 'export'
-  },
-  /** Current logged-in user object */
-  currentUser: {
-    type: Object,
-    default: null
-  },
-  /** Whether current user is admin */
-  isAdmin: {
-    type: Boolean,
-    default: false
-  }
+  syncing: { type: Boolean, default: false },
+  exporting: { type: Boolean, default: false },
+  syncYear: { type: Number, default: new Date().getFullYear() },
+  activePage: { type: String, default: 'export' },
+  currentUser: { type: Object, default: null },
+  isAdmin: { type: Boolean, default: false }
 })
 
 const emit = defineEmits(['sync', 'export', 'page-change', 'logout'])
 </script>
 
 <template>
+  <!-- ===== Desktop header (sm+): single row, everything visible ===== -->
   <header
-    class="flex items-center justify-between h-14 sm:h-16 px-4 sm:px-6 lg:px-8 border-b border-border-default bg-white"
+    class="hidden sm:flex items-center justify-between h-16 px-6 lg:px-8 border-b border-border-default bg-white"
   >
-    <!-- Left: Logo, title, and navigation tabs -->
     <div class="flex items-center gap-3">
       <CalendarDays class="text-accent" :size="28" :stroke-width="1.8" />
-      <span class="text-lg font-semibold text-text-primary hidden sm:inline">员工请假管理系统</span>
+      <span class="text-lg font-semibold text-text-primary">员工请假管理系统</span>
 
-      <!-- Navigation tabs -->
       <nav class="flex items-center gap-1 ml-4">
         <button
           class="px-3 py-1.5 text-[13px] rounded-md transition-colors"
@@ -66,7 +41,6 @@ const emit = defineEmits(['sync', 'export', 'page-change', 'logout'])
         >
           数据分析
         </button>
-        <!-- Admin tab (visible only to admins) -->
         <button
           v-if="isAdmin"
           class="px-3 py-1.5 text-[13px] rounded-md transition-colors flex items-center gap-1"
@@ -81,38 +55,30 @@ const emit = defineEmits(['sync', 'export', 'page-change', 'logout'])
       </nav>
     </div>
 
-    <!-- Right: Actions and user info -->
-    <div class="flex items-center gap-2 sm:gap-3 lg:gap-4">
-      <!-- Sync button (admin only, hidden on analytics/admin page) -->
+    <div class="flex items-center gap-3 lg:gap-4">
       <button
         v-if="activePage === 'export' && isAdmin"
-        class="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 lg:px-4 py-2 text-sm font-medium text-text-secondary border border-border-default rounded-lg hover:bg-surface transition-colors"
+        class="flex items-center gap-2 px-3 lg:px-4 py-2 text-sm font-medium text-text-secondary border border-border-default rounded-lg hover:bg-surface transition-colors"
         :disabled="syncing"
         @click="emit('sync')"
       >
-        <RefreshCw
-          :size="16"
-          :class="{ 'animate-spin': syncing }"
-        />
-        <span class="hidden sm:inline">{{ syncing ? '同步中...' : `同步 ${syncYear} 数据` }}</span>
+        <RefreshCw :size="16" :class="{ 'animate-spin': syncing }" />
+        {{ syncing ? '同步中...' : `同步 ${syncYear} 数据` }}
       </button>
 
-      <!-- Export Excel button (hidden on analytics/admin page) -->
       <button
         v-if="activePage === 'export'"
-        class="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 lg:px-5 py-2 text-sm font-semibold text-white bg-accent rounded-lg hover:bg-blue-700 transition-colors"
+        class="flex items-center gap-2 px-3 lg:px-5 py-2 text-sm font-semibold text-white bg-accent rounded-lg hover:bg-blue-700 transition-colors"
         :disabled="exporting"
         @click="emit('export')"
       >
         <Download :size="16" />
-        <span class="hidden sm:inline">{{ exporting ? '导出中...' : '导出 Excel' }}</span>
+        {{ exporting ? '导出中...' : '导出 Excel' }}
       </button>
 
-      <!-- Divider -->
-      <div class="hidden sm:block w-px h-6 bg-border-default"></div>
+      <div class="w-px h-6 bg-border-default"></div>
 
-      <!-- User info -->
-      <div class="hidden sm:flex items-center gap-2">
+      <div class="flex items-center gap-2">
         <img
           v-if="currentUser?.avatar"
           :src="currentUser.avatar"
@@ -130,10 +96,8 @@ const emit = defineEmits(['sync', 'export', 'page-change', 'logout'])
         </span>
       </div>
 
-      <!-- Logout button -->
       <button
         class="flex items-center gap-1 px-2 py-1.5 text-xs text-text-tertiary hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
-        title="退出登录"
         @click="emit('logout')"
       >
         <LogOut :size="14" />
@@ -141,4 +105,72 @@ const emit = defineEmits(['sync', 'export', 'page-change', 'logout'])
       </button>
     </div>
   </header>
+
+  <!-- ===== Mobile top bar (<sm): slim, only action buttons ===== -->
+  <header
+    class="flex sm:hidden items-center justify-between h-11 px-4 border-b border-border-default bg-white"
+  >
+    <span class="text-sm font-medium text-text-secondary truncate">
+      {{ currentUser?.name || '用户' }}
+      <span v-if="isAdmin" class="text-[10px] ml-1 px-1 py-0.5 bg-amber-100 text-amber-700 rounded font-medium">管理员</span>
+    </span>
+
+    <div class="flex items-center gap-1">
+      <button
+        v-if="activePage === 'export' && isAdmin"
+        class="p-2 rounded-lg transition-colors"
+        :class="syncing ? 'text-accent' : 'text-text-tertiary active:bg-gray-100'"
+        :disabled="syncing"
+        @click="emit('sync')"
+      >
+        <RefreshCw :size="18" :class="{ 'animate-spin': syncing }" />
+      </button>
+      <button
+        v-if="activePage === 'export'"
+        class="p-2 text-white bg-accent rounded-lg active:bg-blue-700 transition-colors"
+        :disabled="exporting"
+        @click="emit('export')"
+      >
+        <Download :size="18" />
+      </button>
+      <button
+        class="p-2 text-text-tertiary active:text-red-600 active:bg-red-50 rounded-lg transition-colors"
+        @click="emit('logout')"
+      >
+        <LogOut :size="18" />
+      </button>
+    </div>
+  </header>
+
+  <!-- ===== Mobile bottom TabBar (<sm) ===== -->
+  <nav
+    class="fixed sm:hidden bottom-0 left-0 right-0 z-50 flex items-stretch bg-white border-t border-border-default"
+    style="padding-bottom: env(safe-area-inset-bottom)"
+  >
+    <button
+      class="flex-1 flex flex-col items-center justify-center gap-0.5 py-2 transition-colors"
+      :class="activePage === 'export' ? 'text-accent' : 'text-text-tertiary'"
+      @click="emit('page-change', 'export')"
+    >
+      <FileSpreadsheet :size="20" :stroke-width="activePage === 'export' ? 2.2 : 1.6" />
+      <span class="text-[10px] font-medium">数据导出</span>
+    </button>
+    <button
+      class="flex-1 flex flex-col items-center justify-center gap-0.5 py-2 transition-colors"
+      :class="activePage === 'analytics' ? 'text-accent' : 'text-text-tertiary'"
+      @click="emit('page-change', 'analytics')"
+    >
+      <BarChart3 :size="20" :stroke-width="activePage === 'analytics' ? 2.2 : 1.6" />
+      <span class="text-[10px] font-medium">数据分析</span>
+    </button>
+    <button
+      v-if="isAdmin"
+      class="flex-1 flex flex-col items-center justify-center gap-0.5 py-2 transition-colors"
+      :class="activePage === 'admin' ? 'text-accent' : 'text-text-tertiary'"
+      @click="emit('page-change', 'admin')"
+    >
+      <Shield :size="20" :stroke-width="activePage === 'admin' ? 2.2 : 1.6" />
+      <span class="text-[10px] font-medium">用户管理</span>
+    </button>
+  </nav>
 </template>
