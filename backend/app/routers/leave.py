@@ -9,9 +9,10 @@ GET /api/leave/types
 import logging
 from typing import List, Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 
+from app.auth import get_current_user
 from app.config import settings
 from app.database import async_session
 from app.models import LeaveType
@@ -43,6 +44,7 @@ async def monthly_summary(
     pageSize: int = Query(default=10, ge=1, le=100, description="Page size"),
     sortBy: str = Query(default="name", description="Sort field: name or total"),
     sortOrder: str = Query(default="asc", description="Sort order: asc or desc"),
+    _user=Depends(get_current_user),
 ):
     """
     Get monthly leave summary with pagination, filtering, and sorting.
@@ -71,6 +73,7 @@ async def daily_detail(
     employeeId: str = Query(..., description="Employee userid"),
     year: int = Query(..., description="Year"),
     month: int = Query(..., ge=1, le=12, description="Month (1-12)"),
+    _user=Depends(get_current_user),
 ):
     """
     Get daily leave detail for a specific employee in a specific month.
@@ -95,6 +98,7 @@ async def daily_leave_count(
     employeeName: Optional[str] = Query(
         default=None, description="Employee name keyword"
     ),
+    _user=Depends(get_current_user),
 ):
     """
     Get per-day leave headcount for a given month.
@@ -114,7 +118,7 @@ async def daily_leave_count(
 
 
 @router.get("/types", response_model=List[LeaveTypeOut])
-async def leave_types():
+async def leave_types(_user=Depends(get_current_user)):
     """
     Get the list of leave types from local DB.
     If LEAVE_TYPE_NAMES is configured, only return those types.

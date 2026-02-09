@@ -8,13 +8,15 @@ the database on startup.
 import logging
 import os
 from contextlib import asynccontextmanager
+from datetime import datetime
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from app.database import init_db
-from app.routers import analytics, departments, leave, export, sync
+from app.config import settings
+from app.database import async_session, init_db
+from app.routers import admin, analytics, auth, departments, export, leave, sync
 
 # Configure logging
 logging.basicConfig(
@@ -22,6 +24,66 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+# APScheduler instance (created lazily)
+_scheduler = None
+
+
+async def _ensure_admin_users() -> None:
+    """Ensure all admin phone numbers are in the allowed_user table."""
+    if not settings.admin_phones:
+        return
+    phones = [p.strip() for p in settings.admin_phones.split(",") if p.strip()]
+    if not phones:
+        return
+
+    from sqlalchemy import select
+    from app.models import AllowedUser
+
+    async with async_session() as session:
+        for phone in phones:
+            result = await session.execute(
+                select(AllowedUser).where(AllowedUser.mobile == phone)
+            )
+            if not result.scalar_one_or_none():
+                session.add(AllowedUser(
+                    mobile=phone,
+                    name="管理员",
+                    created_at=datetime.utcnow(),
+                ))
+                logger.info("Added admin phone %s to allowed_user table", phone)
+        await session.commit()
+
+
+def _setup_scheduler():
+    """Set up APScheduler with cron-based sync if configured."""
+    global _scheduler
+    cron_expr = settings.sync_cron.strip()
+    if not cron_expr:
+        logger.info("SYNC_CRON not set, scheduled sync disabled")
+        return
+
+    try:
+        from apscheduler.schedulers.asyncio import AsyncIOScheduler
+        from apscheduler.triggers.cron import CronTrigger
+
+        _scheduler = AsyncIOScheduler()
+        trigger = CronTrigger.from_crontab(cron_expr)
+
+        async def scheduled_sync():
+            """Run full sync as a scheduled job."""
+            logger.info("Scheduled sync triggered by cron: %s", cron_expr)
+            try:
+                from app.services.sync import full_sync
+                await full_sync()
+            except Exception as e:
+                logger.exception("Scheduled sync failed: %s", e)
+
+        _scheduler.add_job(scheduled_sync, trigger, id="scheduled_sync", replace_existing=True)
+        _scheduler.start()
+        logger.info("APScheduler started with cron: %s", cron_expr)
+    except Exception as e:
+        logger.exception("Failed to setup scheduler: %s", e)
 
 
 @asynccontextmanager
@@ -31,8 +93,21 @@ async def lifespan(app: FastAPI):
     os.makedirs("data", exist_ok=True)
     await init_db()
     logger.info("Database initialized")
+
+    # Ensure admin users are in allowed_user table
+    await _ensure_admin_users()
+
+    # Start scheduled sync if configured
+    _setup_scheduler()
+
     yield
-    # Shutdown: close DingTalk HTTP client
+
+    # Shutdown: stop scheduler and close DingTalk HTTP client
+    global _scheduler
+    if _scheduler:
+        _scheduler.shutdown(wait=False)
+        logger.info("APScheduler shut down")
+
     from app.dingtalk.client import dingtalk_client
     await dingtalk_client.close()
     logger.info("Application shutdown complete")
@@ -58,6 +133,8 @@ app.add_middleware(
 )
 
 # Register API routers
+app.include_router(auth.router)
+app.include_router(admin.router)
 app.include_router(departments.router)
 app.include_router(leave.router)
 app.include_router(export.router)

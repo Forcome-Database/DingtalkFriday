@@ -11,7 +11,9 @@ GET /api/analytics/employee-ranking
 import logging
 from datetime import datetime
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
+
+from app.auth import get_current_user
 
 from app.schemas import (
     DepartmentComparisonResponse,
@@ -38,6 +40,7 @@ async def monthly_trend(
         default=None,
         description="Year to query (defaults to current year)",
     ),
+    _user=Depends(get_current_user),
 ):
     """
     Get monthly leave trend with year-over-year comparison.
@@ -55,6 +58,7 @@ async def leave_type_distribution(
         default=None,
         description="Year to query (defaults to current year)",
     ),
+    _user=Depends(get_current_user),
 ):
     """
     Get leave type distribution (for ring/donut chart).
@@ -76,6 +80,7 @@ async def department_comparison(
         default="total",
         description="Sort metric: 'total' for total days or 'avg' for average days",
     ),
+    _user=Depends(get_current_user),
 ):
     """
     Get department leave comparison (for horizontal bar chart).
@@ -93,6 +98,7 @@ async def weekday_distribution(
         default=None,
         description="Year to query (defaults to current year)",
     ),
+    _user=Depends(get_current_user),
 ):
     """
     Get leave weekday distribution (for bar chart).
@@ -116,6 +122,7 @@ async def employee_ranking(
         le=50,
         description="Maximum number of employees to return",
     ),
+    _user=Depends(get_current_user),
 ):
     """
     Get employee leave ranking (for stacked bar chart).

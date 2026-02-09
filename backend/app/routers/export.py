@@ -8,9 +8,10 @@ import logging
 from datetime import datetime
 from urllib.parse import quote
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
+from app.auth import get_current_user
 from app.schemas import ExportRequest
 from app.services.export import export_leave_data
 
@@ -19,7 +20,7 @@ router = APIRouter(prefix="/api/leave", tags=["export"])
 
 
 @router.post("/export")
-async def export_excel(request: ExportRequest):
+async def export_excel(request: ExportRequest, _user=Depends(get_current_user)):
     """
     Export leave data as an Excel (.xlsx) file.
     Returns a file stream with proper content headers.

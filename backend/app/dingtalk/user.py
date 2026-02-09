@@ -47,6 +47,40 @@ async def get_user_list_simple(dept_id: int) -> List[Dict[str, Any]]:
     return users
 
 
+async def get_user_info_by_code(auth_code: str) -> Dict[str, Any]:
+    """
+    Exchange a login auth code for basic user info (userid, etc.).
+
+    POST /topapi/v2/user/getuserinfo
+    Body: { code }
+    Returns: { result: { userid, sys_level, ... } }
+    """
+    data = await dingtalk_client.post(
+        "/topapi/v2/user/getuserinfo",
+        json_body={"code": auth_code},
+    )
+    result = data.get("result", {})
+    logger.info("Got user info by auth code: userid=%s", result.get("userid"))
+    return result
+
+
+async def get_user_detail(userid: str) -> Dict[str, Any]:
+    """
+    Get full user detail by userid.
+
+    POST /topapi/v2/user/get
+    Body: { userid }
+    Returns: { result: { userid, name, mobile, avatar, ... } }
+    """
+    data = await dingtalk_client.post(
+        "/topapi/v2/user/get",
+        json_body={"userid": userid},
+    )
+    result = data.get("result", {})
+    logger.info("Got user detail: userid=%s, name=%s", result.get("userid"), result.get("name"))
+    return result
+
+
 async def get_user_id_list(dept_id: int) -> List[str]:
     """
     Get a list of user IDs for a department.

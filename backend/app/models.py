@@ -38,6 +38,7 @@ class Employee(Base):
     dept_id = Column(Integer, nullable=False, comment="Primary department ID")
     dept_name = Column(String, nullable=True, comment="Primary department name")
     avatar = Column(String, nullable=True, comment="Avatar URL")
+    mobile = Column(String, nullable=True, comment="Mobile phone number")
     updated_at = Column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow,
         comment="Last update timestamp",
@@ -88,6 +89,17 @@ class LeaveType(Base):
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow,
         comment="Last update timestamp",
     )
+
+
+class AllowedUser(Base):
+    """Allowed users table - stores phone numbers permitted to access the system."""
+    __tablename__ = "allowed_user"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    mobile = Column(String, unique=True, nullable=False, comment="Phone number")
+    name = Column(String, nullable=True, comment="Display name")
+    userid = Column(String, nullable=True, comment="DingTalk user ID (filled on login)")
+    created_at = Column(DateTime, default=datetime.utcnow, comment="Creation time")
 
 
 class SyncLog(Base):

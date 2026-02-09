@@ -9,6 +9,59 @@ from pydantic import BaseModel, Field
 
 
 # ---------------------------------------------------------------------------
+# Auth schemas
+# ---------------------------------------------------------------------------
+
+class DingTalkLoginRequest(BaseModel):
+    """Request body for POST /api/auth/dingtalk."""
+    authCode: str = Field(description="DingTalk auth code from dd.runtime.permission.requestAuthCode")
+
+
+class PhoneLoginRequest(BaseModel):
+    """Request body for POST /api/auth/phone."""
+    mobile: str = Field(description="Phone number")
+
+
+class UserInfo(BaseModel):
+    """Current user info."""
+    userid: Optional[str] = None
+    name: str
+    mobile: str
+    avatar: Optional[str] = None
+    isAdmin: bool = False
+
+
+class LoginResponse(BaseModel):
+    """Response for login endpoints."""
+    token: str
+    user: UserInfo
+
+
+class AuthConfigResponse(BaseModel):
+    """Response for GET /api/auth/config."""
+    corpId: str
+
+
+# ---------------------------------------------------------------------------
+# Admin schemas
+# ---------------------------------------------------------------------------
+
+class AddUserRequest(BaseModel):
+    """Request body for POST /api/admin/users."""
+    mobile: str = Field(description="Phone number")
+    name: Optional[str] = Field(default=None, description="Display name")
+
+
+class AllowedUserOut(BaseModel):
+    """Single allowed user in list response."""
+    id: int
+    mobile: str
+    name: Optional[str] = None
+    userid: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+
+# ---------------------------------------------------------------------------
 # Department schemas
 # ---------------------------------------------------------------------------
 

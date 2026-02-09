@@ -10,9 +10,10 @@ import logging
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks, Depends
 from sqlalchemy import select
 
+from app.auth import get_current_user, require_admin
 from app.database import async_session
 from app.models import SyncLog
 from app.schemas import (
@@ -43,6 +44,7 @@ async def _run_sync(year: Optional[int] = None) -> None:
 async def trigger_sync(
     background_tasks: BackgroundTasks,
     request: Optional[SyncTriggerRequest] = None,
+    _admin=Depends(require_admin),
 ):
     """
     Trigger a full data sync in the background.
@@ -64,7 +66,7 @@ async def trigger_sync(
 
 
 @router.get("/sync/status", response_model=SyncStatusResponse)
-async def sync_status():
+async def sync_status(_user=Depends(get_current_user)):
     """
     Get the most recent sync log entries (up to 20).
     """

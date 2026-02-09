@@ -19,7 +19,11 @@
       "Bash(tasklist:*)",
       "Bash(where:*)",
       "Bash(node node_modules/.bin/vite:*)",
-      "Bash(D:/Work/software/anaconda3/python.exe -c:*)"
+      "Bash(D:/Work/software/anaconda3/python.exe -c:*)",
+      "Bash(venvScriptspip install PyJWT APScheduler)",
+      "Bash(./venv/Scripts/pip install:*)",
+      "Bash(./venv/Scripts/python:*)",
+      "Bash(chmod:*)"
     ]
   }
 }

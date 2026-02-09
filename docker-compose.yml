@@ -7,11 +7,11 @@ services:
       dockerfile: Dockerfile
     container_name: leave-backend
     ports:
-      - "8000:8000"
+      - "${BACKEND_PORT:-8000}:8000"
     volumes:
       - ./backend/data:/app/data
     env_file:
-      - ./backend/.env
+      - ./.env
     restart: unless-stopped
 
   frontend:
@@ -20,7 +20,7 @@ services:
       dockerfile: Dockerfile
     container_name: leave-frontend
     ports:
-      - "80:80"
+      - "${FRONTEND_PORT:-80}:80"
     depends_on:
       - backend
     restart: unless-stopped

@@ -10,9 +10,10 @@ class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=("../.env", ".env"),
         env_file_encoding="utf-8",
         case_sensitive=False,
+        extra="ignore",
     )
 
     # DingTalk API configuration
@@ -31,6 +32,17 @@ class Settings(BaseSettings):
 
     # Admin user ID for API calls that require operator identity
     admin_userid: str = ""
+
+    # Auth & admin configuration
+    admin_phones: str = ""  # Comma-separated admin phone numbers
+    jwt_secret: str = "change-me-in-production"
+    jwt_expire_hours: int = 24
+
+    # Scheduled sync cron expression (empty = disabled), e.g. "0 2 * * *"
+    sync_cron: str = ""
+
+    # DingTalk Corp ID (required for H5 micro-app login)
+    dingtalk_corp_id: str = ""
 
 
 # Singleton settings instance

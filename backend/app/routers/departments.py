@@ -7,9 +7,10 @@ GET /api/departments?parentId=1
 import logging
 from typing import List, Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 
+from app.auth import get_current_user
 from app.database import async_session
 from app.models import Department
 from app.schemas import DepartmentOut
@@ -23,6 +24,7 @@ router = APIRouter(prefix="/api", tags=["departments"])
 @router.get("/departments", response_model=List[DepartmentOut])
 async def get_departments(
     parentId: Optional[int] = Query(default=None, description="Parent department ID"),
+    _user=Depends(get_current_user),
 ):
     """
     Get sub-departments for the given parent department.

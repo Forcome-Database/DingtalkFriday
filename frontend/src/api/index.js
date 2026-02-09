@@ -1,14 +1,37 @@
 import axios from 'axios'
+import { getToken, removeToken, removeUser } from '../utils/auth.js'
 
 const api = axios.create({
   baseURL: '/api',
   timeout: 30000
 })
 
+// Request interceptor: attach JWT token
+api.interceptors.request.use(
+  (config) => {
+    const token = getToken()
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`
+    }
+    return config
+  },
+  (error) => Promise.reject(error)
+)
+
 // Response interceptor for error handling
 api.interceptors.response.use(
   (response) => response.data,
   (error) => {
+    const status = error.response?.status
+    if (status === 401) {
+      // Token expired or invalid, clear auth state and redirect
+      removeToken()
+      removeUser()
+      // Use location to force full page reload to login
+      if (!window.location.pathname.startsWith('/login')) {
+        window.location.href = '/login'
+      }
+    }
     const message = error.response?.data?.detail || error.message || '请求失败'
     console.error('[API Error]', message)
     return Promise.reject(error)
@@ -16,6 +39,57 @@ api.interceptors.response.use(
 )
 
 export default {
+  // --- Auth API ---
+
+  /**
+   * Get DingTalk config (corpId)
+   */
+  getAuthConfig() {
+    return api.get('/auth/config')
+  },
+
+  /**
+   * DingTalk H5 login
+   * @param {{ authCode: string }} data
+   */
+  loginDingTalk(data) {
+    return api.post('/auth/dingtalk', data)
+  },
+
+  /**
+   * Get current user info
+   */
+  getMe() {
+    return api.get('/auth/me')
+  },
+
+  // --- Admin API ---
+
+  /**
+   * List all allowed users (admin only)
+   */
+  getUsers() {
+    return api.get('/admin/users')
+  },
+
+  /**
+   * Add an allowed user (admin only)
+   * @param {{ mobile: string, name?: string }} data
+   */
+  addUser(data) {
+    return api.post('/admin/users', data)
+  },
+
+  /**
+   * Remove an allowed user (admin only)
+   * @param {string} mobile
+   */
+  removeUser(mobile) {
+    return api.delete(`/admin/users/${mobile}`)
+  },
+
+  // --- Existing API (unchanged) ---
+
   /**
    * Get department list by parent ID
    * @param {number} parentId - Parent department ID, defaults to 1 (root)
@@ -35,17 +109,6 @@ export default {
 
   /**
    * Get monthly leave summary data
-   * @param {Object} params - Query parameters
-   * @param {number} params.year - Year
-   * @param {number} [params.deptId] - Department ID
-   * @param {string[]} [params.leaveTypes] - Leave type names array
-   * @param {string} [params.employeeName] - Employee name keyword
-   * @param {string} params.unit - Unit: 'day' or 'hour'
-   * @param {number} params.page - Page number
-   * @param {number} params.pageSize - Items per page
-   * @param {string} [params.sortBy] - Sort field
-   * @param {string} [params.sortOrder] - Sort order: 'asc' or 'desc'
-   * @returns {Promise<{stats: Object, list: Array, summary: Object, pagination: Object}>}
    */
   getMonthlySummary(params) {
     return api.get('/leave/monthly-summary', {
@@ -65,10 +128,6 @@ export default {
 
   /**
    * Get daily leave detail for an employee in a specific month
-   * @param {string} employeeId - Employee user ID
-   * @param {number} year - Year
-   * @param {number} month - Month (1-12)
-   * @returns {Promise<{employee: Object, records: Array, summary: Object}>}
    */
   getDailyDetail(employeeId, year, month) {
     return api.get('/leave/daily-detail', {
@@ -78,13 +137,6 @@ export default {
 
   /**
    * Get per-day leave headcount for a given month
-   * @param {Object} params - Query parameters
-   * @param {number} params.year - Year
-   * @param {number} params.month - Month (1-12)
-   * @param {number} [params.deptId] - Department ID
-   * @param {string[]} [params.leaveTypes] - Leave type names array
-   * @param {string} [params.employeeName] - Employee name keyword
-   * @returns {Promise<{todayCount: number, days: Array, maxCount: number}>}
    */
   getDailyLeaveCount(params) {
     return api.get('/leave/daily-leave-count', {
@@ -100,13 +152,6 @@ export default {
 
   /**
    * Export leave data as Excel file
-   * @param {Object} params - Export parameters
-   * @param {number} params.year - Year
-   * @param {number} [params.deptId] - Department ID
-   * @param {string[]} [params.leaveTypes] - Leave type names
-   * @param {string} [params.employeeName] - Employee name keyword
-   * @param {string} params.unit - Unit: 'day' or 'hour'
-   * @returns {Promise<Blob>} Excel file blob
    */
   exportExcel(params) {
     return api.post('/leave/export', {
@@ -122,8 +167,6 @@ export default {
 
   /**
    * Trigger data sync from DingTalk
-   * @param {number} [year] - Year to sync, defaults to current year on server
-   * @returns {Promise<{message: string, sync_id: number}>}
    */
   triggerSync(year) {
     return api.post('/sync', { year })
@@ -131,7 +174,6 @@ export default {
 
   /**
    * Query current sync status
-   * @returns {Promise<{status: string, message: string, started_at: string, finished_at: string}>}
    */
   getSyncStatus() {
     return api.get('/sync/status')
@@ -139,49 +181,22 @@ export default {
 
   // --- Analytics API ---
 
-  /**
-   * Get monthly leave trend data for a given year
-   * @param {number} year - Year
-   * @returns {Promise<{current: number[], previous: number[]}>}
-   */
   getMonthlyTrend(year) {
     return api.get('/analytics/monthly-trend', { params: { year } })
   },
 
-  /**
-   * Get leave type distribution for a given year
-   * @param {number} year - Year
-   * @returns {Promise<Array<{type: string, days: number, ratio: number}>>}
-   */
   getLeaveTypeDistribution(year) {
     return api.get('/analytics/leave-type-distribution', { params: { year } })
   },
 
-  /**
-   * Get department comparison data for a given year
-   * @param {number} year - Year
-   * @param {string} [metric='total'] - Metric: 'total' or 'avg'
-   * @returns {Promise<Array<{dept: string, value: number}>>}
-   */
   getDepartmentComparison(year, metric = 'total') {
     return api.get('/analytics/department-comparison', { params: { year, metric } })
   },
 
-  /**
-   * Get weekday distribution data for a given year
-   * @param {number} year - Year
-   * @returns {Promise<Array<{weekday: string, days: number}>>}
-   */
   getWeekdayDistribution(year) {
     return api.get('/analytics/weekday-distribution', { params: { year } })
   },
 
-  /**
-   * Get employee leave ranking for a given year
-   * @param {number} year - Year
-   * @param {number} [limit=10] - Number of top employees to return
-   * @returns {Promise<Array<{name: string, dept: string, details: Object, total: number}>>}
-   */
   getEmployeeRanking(year, limit = 10) {
     return api.get('/analytics/employee-ranking', { params: { year, limit } })
   }
