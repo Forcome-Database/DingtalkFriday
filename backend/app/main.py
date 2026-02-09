@@ -94,6 +94,10 @@ async def lifespan(app: FastAPI):
     await init_db()
     logger.info("Database initialized")
 
+    # Log loaded config for debugging
+    from app.auth import _get_admin_phones
+    logger.info("ADMIN_PHONES config: %r → parsed: %s", settings.admin_phones, _get_admin_phones())
+
     # Ensure admin users are in allowed_user table
     await _ensure_admin_users()
 
