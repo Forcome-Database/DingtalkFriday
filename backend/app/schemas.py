@@ -174,6 +174,80 @@ class SyncStatusResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Analytics schemas
+# ---------------------------------------------------------------------------
+
+class MonthlyTrendItem(BaseModel):
+    """Single month data point for the monthly trend chart."""
+    month: int = Field(description="Month number (1-12)")
+    days: float = Field(description="Total leave days in this month")
+
+
+class MonthlyTrendResponse(BaseModel):
+    """Response for GET /api/analytics/monthly-trend."""
+    currentYear: List[MonthlyTrendItem]
+    previousYear: List[MonthlyTrendItem]
+
+
+class LeaveTypeDistributionItem(BaseModel):
+    """Single leave type in the distribution chart."""
+    type: str = Field(description="Leave type name")
+    days: float = Field(description="Total leave days for this type")
+    ratio: float = Field(description="Percentage of total leave days")
+
+
+class LeaveTypeDistributionResponse(BaseModel):
+    """Response for GET /api/analytics/leave-type-distribution."""
+    total: float = Field(description="Grand total leave days")
+    items: List[LeaveTypeDistributionItem]
+
+
+class DepartmentComparisonItem(BaseModel):
+    """Single department in the comparison chart."""
+    name: str = Field(description="Department name")
+    totalDays: float = Field(description="Total leave days for the department")
+    avgDays: float = Field(description="Average leave days per employee")
+    headcount: int = Field(description="Number of employees in the department")
+
+
+class DepartmentComparisonResponse(BaseModel):
+    """Response for GET /api/analytics/department-comparison."""
+    departments: List[DepartmentComparisonItem]
+    average: float = Field(description="Overall average across all departments")
+
+
+class WeekdayDistributionItem(BaseModel):
+    """Single weekday in the distribution chart."""
+    day: int = Field(description="ISO weekday number (1=Monday, 5=Friday)")
+    label: str = Field(description="Weekday label in Chinese")
+    count: int = Field(description="Number of leave occurrences on this weekday")
+
+
+class WeekdayDistributionResponse(BaseModel):
+    """Response for GET /api/analytics/weekday-distribution."""
+    weekdays: List[WeekdayDistributionItem]
+
+
+class EmployeeLeaveBreakdown(BaseModel):
+    """Leave breakdown by type for a single employee."""
+    type: str = Field(description="Leave type name")
+    days: float = Field(description="Leave days for this type")
+
+
+class EmployeeRankingItem(BaseModel):
+    """Single employee in the ranking chart."""
+    name: str = Field(description="Employee name")
+    dept: str = Field(description="Department name")
+    total: float = Field(description="Total leave days")
+    breakdown: List[EmployeeLeaveBreakdown]
+
+
+class EmployeeRankingResponse(BaseModel):
+    """Response for GET /api/analytics/employee-ranking."""
+    employees: List[EmployeeRankingItem]
+
+
+# ---------------------------------------------------------------------------
 # Generic response wrapper
 # ---------------------------------------------------------------------------
 

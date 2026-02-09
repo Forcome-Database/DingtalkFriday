@@ -135,5 +135,54 @@ export default {
    */
   getSyncStatus() {
     return api.get('/sync/status')
+  },
+
+  // --- Analytics API ---
+
+  /**
+   * Get monthly leave trend data for a given year
+   * @param {number} year - Year
+   * @returns {Promise<{current: number[], previous: number[]}>}
+   */
+  getMonthlyTrend(year) {
+    return api.get('/analytics/monthly-trend', { params: { year } })
+  },
+
+  /**
+   * Get leave type distribution for a given year
+   * @param {number} year - Year
+   * @returns {Promise<Array<{type: string, days: number, ratio: number}>>}
+   */
+  getLeaveTypeDistribution(year) {
+    return api.get('/analytics/leave-type-distribution', { params: { year } })
+  },
+
+  /**
+   * Get department comparison data for a given year
+   * @param {number} year - Year
+   * @param {string} [metric='total'] - Metric: 'total' or 'avg'
+   * @returns {Promise<Array<{dept: string, value: number}>>}
+   */
+  getDepartmentComparison(year, metric = 'total') {
+    return api.get('/analytics/department-comparison', { params: { year, metric } })
+  },
+
+  /**
+   * Get weekday distribution data for a given year
+   * @param {number} year - Year
+   * @returns {Promise<Array<{weekday: string, days: number}>>}
+   */
+  getWeekdayDistribution(year) {
+    return api.get('/analytics/weekday-distribution', { params: { year } })
+  },
+
+  /**
+   * Get employee leave ranking for a given year
+   * @param {number} year - Year
+   * @param {number} [limit=10] - Number of top employees to return
+   * @returns {Promise<Array<{name: string, dept: string, details: Object, total: number}>>}
+   */
+  getEmployeeRanking(year, limit = 10) {
+    return api.get('/analytics/employee-ranking', { params: { year, limit } })
   }
 }

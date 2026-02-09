@@ -7,6 +7,7 @@ import StatsCards from './components/StatsCards.vue'
 import DataTable from './components/DataTable.vue'
 import DailyLeaveStats from './components/DailyLeaveStats.vue'
 import LeaveCalendarModal from './components/LeaveCalendarModal.vue'
+import AnalyticsView from './components/AnalyticsView.vue'
 
 const {
   // State
@@ -50,6 +51,9 @@ const {
   triggerSync,
   exportExcel
 } = useLeaveData()
+
+/** Active page: 'export' (default) or 'analytics' */
+const activePage = ref('export')
 
 /** Active tab: 'table' (default) or 'daily' */
 const activeTab = ref('table')
@@ -103,12 +107,14 @@ onMounted(async () => {
       :syncing="syncing"
       :exporting="exporting"
       :sync-year="filters.year"
+      :active-page="activePage"
       @sync="triggerSync(filters.year)"
       @export="handleExport"
+      @page-change="activePage = $event"
     />
 
-    <!-- Main content area -->
-    <div class="p-4 sm:p-6 lg:p-8 space-y-4 sm:space-y-6">
+    <!-- Data export page (existing content) -->
+    <div v-if="activePage === 'export'" class="p-4 sm:p-6 lg:p-8 space-y-4 sm:space-y-6">
       <!-- Page title section -->
       <div class="flex items-center justify-between">
         <div>
@@ -191,6 +197,9 @@ onMounted(async () => {
         @month-change="setDailyLeaveMonth"
       />
     </div>
+
+    <!-- Data analytics page -->
+    <AnalyticsView v-if="activePage === 'analytics'" />
 
     <!-- Leave calendar detail modal -->
     <LeaveCalendarModal

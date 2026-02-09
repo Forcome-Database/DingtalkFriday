@@ -16,7 +16,10 @@
       "WebFetch(domain:apifox.com)",
       "Bash(npm run build:*)",
       "Bash(pip install:*)",
-      "Bash(tasklist:*)"
+      "Bash(tasklist:*)",
+      "Bash(where:*)",
+      "Bash(node node_modules/.bin/vite:*)",
+      "Bash(D:/Work/software/anaconda3/python.exe -c:*)"
     ]
   }
 }

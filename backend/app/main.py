@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.database import init_db
-from app.routers import departments, leave, export, sync
+from app.routers import analytics, departments, leave, export, sync
 
 # Configure logging
 logging.basicConfig(
@@ -62,6 +62,7 @@ app.include_router(departments.router)
 app.include_router(leave.router)
 app.include_router(export.router)
 app.include_router(sync.router)
+app.include_router(analytics.router)
 
 
 # Health check endpoint
