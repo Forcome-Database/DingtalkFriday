@@ -13,7 +13,7 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 
-from app.auth import require_admin
+from app.auth import require_admin, _get_admin_phones
 from app.database import async_session
 from app.models import AllowedUser
 from app.schemas import AddUserRequest, AllowedUserOut, MessageResponse
@@ -25,6 +25,7 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 @router.get("/users", response_model=List[AllowedUserOut])
 async def list_users(_admin=Depends(require_admin)):
     """List all allowed users."""
+    admin_phones = _get_admin_phones()
     async with async_session() as session:
         result = await session.execute(
             select(AllowedUser).order_by(AllowedUser.id)
@@ -37,6 +38,7 @@ async def list_users(_admin=Depends(require_admin)):
             name=u.name,
             userid=u.userid,
             created_at=u.created_at,
+            isAdmin=u.mobile in admin_phones,
         )
         for u in users
     ]

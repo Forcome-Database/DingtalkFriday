@@ -155,7 +155,10 @@ onMounted(loadUsers)
               :key="user.id"
               class="border-t border-border-default hover:bg-surface/50 transition-colors"
             >
-              <td class="px-4 sm:px-6 py-3 font-medium text-text-primary">{{ user.mobile }}</td>
+              <td class="px-4 sm:px-6 py-3 font-medium text-text-primary">
+                {{ user.mobile }}
+                <span v-if="user.isAdmin" class="ml-2 text-[10px] px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded font-medium">管理员</span>
+              </td>
               <td class="px-4 sm:px-6 py-3 text-text-secondary">{{ user.name || '-' }}</td>
               <td class="px-4 sm:px-6 py-3 text-text-tertiary text-xs font-mono">{{ user.userid || '-' }}</td>
               <td class="px-4 sm:px-6 py-3 text-text-tertiary text-xs">

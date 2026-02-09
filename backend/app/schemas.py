@@ -59,6 +59,7 @@ class AllowedUserOut(BaseModel):
     name: Optional[str] = None
     userid: Optional[str] = None
     created_at: Optional[datetime] = None
+    isAdmin: bool = False
 
 
 # ---------------------------------------------------------------------------
