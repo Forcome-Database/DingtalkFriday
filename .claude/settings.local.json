@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir:*)",
+      "Bash(powershell -Command:*)",
+      "mcp__dingtalk-api__read_project_oas_ref_resources_uxotin",
+      "Bash(node -e \"const fs=require\\(''fs''\\); const data=JSON.parse\\(fs.readFileSync\\(''C:/Users/leo/.claude/projects/E--Project-DingtalkFriday/42279308-7f75-4bf5-b106-fa6fc8de12ba/tool-results/mcp-dingtalk-api-read_project_oas_uxotin-1770357575673.txt'',''utf8''\\)\\); const oas=JSON.parse\\(data[0].text\\); const paths=Object.keys\\(oas.paths\\); const filtered=paths.filter\\(p=>/\\(attend|leave|vacation|calendar\\)/i.test\\(p\\)\\); console.log\\(filtered.join\\(''\\\\n''\\)\\);\")",
+      "Bash(node -e \"const fs=require\\(''fs''\\); const data=JSON.parse\\(fs.readFileSync\\(''C:/Users/leo/.claude/projects/E--Project-DingtalkFriday/42279308-7f75-4bf5-b106-fa6fc8de12ba/tool-results/mcp-dingtalk-api-read_project_oas_uxotin-1770357575673.txt'',''utf8''\\)\\); const oas=JSON.parse\\(data[0].text\\); const paths=Object.keys\\(oas.paths\\); const filtered=paths.filter\\(p=>/\\(user.*list|listbypage|listsimple|department.*list|gettoken|access_token\\)/i.test\\(p\\)\\); console.log\\(filtered.join\\(''\\\\n''\\)\\);\")",
+      "Bash(python -m venv:*)",
+      "Bash(venvScriptspip install -r requirements.txt)",
+      "Bash(npm install:*)",
+      "Bash(\"E:\\\\Project\\\\DingtalkFriday\\\\backend\\\\venv\\\\Scripts\\\\uvicorn.exe\" app.main:app --host 127.0.0.1 --port 8000)",
+      "Bash(npx vite build:*)",
+      "Bash(python:*)",
+      "mcp__dingtalk-api__read_project_oas_uxotin",
+      "WebFetch(domain:apifox.com)",
+      "Bash(npm run build:*)",
+      "Bash(pip install:*)",
+      "Bash(tasklist:*)"
+    ]
+  }
+}
