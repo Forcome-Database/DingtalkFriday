@@ -13,7 +13,7 @@ import AnalyticsView from '../components/AnalyticsView.vue'
 import AdminPanel from '../components/AdminPanel.vue'
 
 const router = useRouter()
-const { currentUser, isAdmin, logout } = useAuth()
+const { currentUser, isAdmin, logout, refreshUser } = useAuth()
 
 const {
   // State
@@ -109,6 +109,8 @@ function handleLogout() {
 
 // Initialize data on mount
 onMounted(async () => {
+  // Refresh user info from server (picks up admin status changes)
+  refreshUser()
   await Promise.all([loadDepartments1(), loadLeaveTypes()])
   await fetchData()
 })
