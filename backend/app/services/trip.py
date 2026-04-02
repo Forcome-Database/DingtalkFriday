@@ -220,26 +220,51 @@ async def get_trip_daily_detail(
         total_hours = sum(r.duration_hours or 0 for r in records)
         total_days = round(total_hours / 8.0, 1)
 
+        detail_records = []
+        for r in records:
+            # Compute per-day display times from the full approval range
+            # begin_time/end_time are like "2026-04-03 09:00:00"
+            rec_start = r.begin_time or ""
+            rec_end = r.end_time or ""
+            rec_start_date = rec_start[:10] if len(rec_start) >= 10 else ""
+            rec_end_date = rec_end[:10] if len(rec_end) >= 10 else ""
+
+            if r.work_date == rec_start_date and r.work_date == rec_end_date:
+                # Same day: show actual start/end times
+                start_display = rec_start[11:16] if len(rec_start) >= 16 else "09:00"
+                end_display = rec_end[11:16] if len(rec_end) >= 16 else "18:00"
+            elif r.work_date == rec_start_date:
+                # First day of multi-day trip
+                start_display = rec_start[11:16] if len(rec_start) >= 16 else "09:00"
+                end_display = "18:00"
+            elif r.work_date == rec_end_date:
+                # Last day
+                start_display = "09:00"
+                end_display = rec_end[11:16] if len(rec_end) >= 16 else "18:00"
+            else:
+                # Middle day
+                start_display = "09:00"
+                end_display = "18:00"
+
+            hrs = r.duration_hours or 0
+            detail_records.append({
+                "date": r.work_date,
+                "startTime": start_display,
+                "endTime": end_display,
+                "hours": round(hrs, 1),
+                "durationHours": round(hrs, 1),
+                "leaveType": r.tag_name,
+                "tagName": r.tag_name,
+                "status": "已审批",
+            })
+
         return {
             "employee": {
                 "name": emp.name if emp else employee_id,
                 "dept": emp.dept_name or "" if emp else "",
             },
             "employeeName": emp.name if emp else employee_id,
-            "records": [
-                {
-                    "date": r.work_date,
-                    "startTime": r.begin_time,
-                    "endTime": r.end_time,
-                    "hours": r.duration_hours or 0,
-                    "leaveType": r.tag_name,
-                    "tagName": r.tag_name,
-                    "durationHours": r.duration_hours,
-                    "beginTime": r.begin_time,
-                    "status": "已审批",
-                }
-                for r in records
-            ],
+            "records": detail_records,
             "summary": {
                 "totalDays": total_days,
                 "totalHours": round(total_hours, 1),

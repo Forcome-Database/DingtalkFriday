@@ -381,13 +381,18 @@ class TripDayRecord(BaseModel):
     date: str = Field(description="YYYY-MM-DD")
     tagName: str = Field(description="出差 or 外出")
     durationHours: float
-    beginTime: str
-    endTime: str
+    startTime: str = Field(description="Display start time for this day, e.g. 09:00")
+    endTime: str = Field(description="Display end time for this day, e.g. 18:00")
+    hours: float = Field(description="Hours for this day (alias of durationHours)")
+    leaveType: str = Field(description="Alias of tagName for calendar modal compatibility")
+    status: str = Field(default="已审批")
 
 
 class TripDailyDetailResponse(BaseModel):
     employeeName: str
+    employee: Optional[dict] = None
     records: List[TripDayRecord]
+    summary: Optional[dict] = None
 
 
 class TripTodayItem(BaseModel):
