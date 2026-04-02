@@ -159,6 +159,19 @@ export default {
   },
 
   /**
+   * Get today's leave detail (list of employees on leave with time info)
+   */
+  getTodayLeaveDetail(params) {
+    return api.get('/leave/today-detail', {
+      params: {
+        deptId: params.deptId || undefined,
+        leaveTypes: params.leaveTypes?.length ? params.leaveTypes.join(',') : undefined,
+        employeeName: params.employeeName || undefined
+      }
+    })
+  },
+
+  /**
    * Export leave data as Excel file
    */
   exportExcel(params) {
