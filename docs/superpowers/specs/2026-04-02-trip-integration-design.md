@@ -54,7 +54,7 @@
 
 用途：记录每个 (userid, work_date) 是否已同步，包括"已查询但无数据"的情况，避免反复拉取空数据。
 
-清理策略：每次全量同步（full_sync）时，删除 1 年前的 cursor 记录。手动同步（force_month）时，先删除目标月的 cursor 记录再重新拉取。
+清理策略：每次 trip 定时同步任务执行时，删除 1 年前的 cursor 记录。手动同步（force_month）时，先删除目标月的 cursor 记录再重新拉取。
 
 ### 索引
 
@@ -83,7 +83,7 @@ sync_trip_records(force_month=None):
      b. 温区 → 查 cursor，7天内已同步则跳过
      c. 调用 get_update_data(userid, date)
      d. 从 approve_list 筛选 biz_type=2
-     e. 对每条记录：计算 duration_hours（API 返回的 duration 除以跨天数，或按整天 8h 计）
+     e. 对每条记录：设置 duration_hours（整天=8h，半天=4h，API 按 work_date 返回每天一条）
      f. UPSERT 到 trip_record（DELETE 该 userid+work_date 旧数据后 INSERT）
      g. UPSERT trip_sync_cursor
   4. 并发控制 + 限流（见下文）
