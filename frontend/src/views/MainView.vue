@@ -213,7 +213,9 @@ onMounted(async () => {
         :stats="stats"
         :unit="filters.unit"
         :today-leave-count="todayLeaveCount"
+        :today-trip-count="(tripStats.todayTripCount || 0) + (tripStats.todayOutingCount || 0)"
         @today-leave-click="fetchTodayLeaveDetail"
+        @today-trip-click="activePage = 'trip'"
       />
 
       <!-- Tab switcher -->
