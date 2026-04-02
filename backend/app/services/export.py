@@ -162,3 +162,109 @@ async def export_leave_data(
         year, dept_id, len(rows),
     )
     return output
+
+
+async def export_trip_excel(
+    year: int,
+    dept_id: Optional[int] = None,
+    trip_type: Optional[str] = None,
+    employee_name: Optional[str] = None,
+) -> io.BytesIO:
+    """
+    Export trip (出差/外出) data as an Excel file.
+
+    The export includes ALL matching rows (no pagination) plus
+    a summary (totals) row at the bottom.
+
+    Columns: 姓名, 部门, 出差(天), 外出(天), 1月~12月, 合计(天) — 17 columns total.
+
+    Returns a BytesIO object containing the .xlsx data.
+    """
+    from app.services.trip import get_trip_monthly_summary
+
+    data = await get_trip_monthly_summary(
+        year=year,
+        dept_id=dept_id,
+        trip_type=trip_type,
+        employee_name=employee_name,
+        page=1,
+        page_size=999999,
+    )
+
+    rows = data["list"]
+    summary = data["summary"]
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = f"{year}年外出出差统计"
+
+    # ---- Header row ----
+    headers = ["姓名", "部门", "出差(天)", "外出(天)"]
+    headers += [f"{m}月" for m in range(1, 13)]
+    headers.append("合计(天)")
+
+    for col, header in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col, value=header)
+        cell.fill = HEADER_FILL
+        cell.font = HEADER_FONT
+        cell.alignment = CENTER_ALIGN
+        cell.border = THIN_BORDER
+
+    # ---- Data rows ----
+    for row_idx, row in enumerate(rows, 2):
+        values = [
+            row["employeeName"],
+            row.get("deptName", ""),
+            row["tripDays"],
+            row["outingDays"],
+        ]
+        for m in range(1, 13):
+            values.append(row["months"].get(str(m), 0))
+        values.append(row["totalDays"])
+
+        for col, val in enumerate(values, 1):
+            cell = ws.cell(row=row_idx, column=col, value=val)
+            cell.font = DATA_FONT
+            cell.alignment = CENTER_ALIGN
+            cell.border = THIN_BORDER
+
+    # ---- Summary row ----
+    sum_row = len(rows) + 2
+    sum_values = [
+        "合计", "",
+        summary["tripDays"],
+        summary["outingDays"],
+    ]
+    for m in range(1, 13):
+        sum_values.append(summary["months"].get(str(m), 0))
+    sum_values.append(summary["totalDays"])
+
+    for col, val in enumerate(sum_values, 1):
+        cell = ws.cell(row=sum_row, column=col, value=val)
+        cell.fill = SUMMARY_FILL
+        cell.font = SUMMARY_FONT
+        cell.alignment = CENTER_ALIGN
+        cell.border = THIN_BORDER
+
+    # ---- Column widths ----
+    ws.column_dimensions["A"].width = 12
+    ws.column_dimensions["B"].width = 14
+    ws.column_dimensions["C"].width = 10
+    ws.column_dimensions["D"].width = 10
+    for i in range(5, 17):
+        ws.column_dimensions[get_column_letter(i)].width = 8
+    ws.column_dimensions[get_column_letter(17)].width = 10
+
+    # ---- Freeze panes (freeze header + first 2 columns) ----
+    ws.freeze_panes = "C2"
+
+    # ---- Write to BytesIO ----
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    logger.info(
+        "Exported trip Excel: year=%d, dept_id=%s, rows=%d",
+        year, dept_id, len(rows),
+    )
+    return output
