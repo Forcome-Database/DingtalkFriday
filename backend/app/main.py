@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.database import async_session, init_db
-from app.routers import admin, analytics, auth, departments, export, leave, sync
+from app.routers import admin, analytics, auth, departments, export, leave, sync, trip
 
 # Configure logging
 logging.basicConfig(
@@ -86,6 +86,42 @@ def _setup_scheduler():
         logger.exception("Failed to setup scheduler: %s", e)
 
 
+def _setup_trip_scheduler():
+    """Set up APScheduler for trip sync if enabled."""
+    global _scheduler
+    if not settings.trip_sync_enabled:
+        logger.info("Trip sync disabled")
+        return
+    cron_expr = settings.trip_sync_cron.strip()
+    if not cron_expr:
+        return
+
+    try:
+        from apscheduler.schedulers.asyncio import AsyncIOScheduler
+        from apscheduler.triggers.cron import CronTrigger
+
+        if _scheduler is None:
+            _scheduler = AsyncIOScheduler()
+
+        trigger = CronTrigger.from_crontab(cron_expr)
+
+        async def scheduled_trip_sync():
+            """Run trip sync as a scheduled job."""
+            logger.info("Scheduled trip sync triggered by cron: %s", cron_expr)
+            try:
+                from app.services.trip_sync import sync_trip_records
+                await sync_trip_records()
+            except Exception as e:
+                logger.exception("Scheduled trip sync failed: %s", e)
+
+        _scheduler.add_job(scheduled_trip_sync, trigger, id="trip_sync", replace_existing=True)
+        if not _scheduler.running:
+            _scheduler.start()
+        logger.info("Trip sync scheduled: %s", cron_expr)
+    except Exception as e:
+        logger.exception("Failed to setup trip scheduler: %s", e)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan: startup and shutdown events."""
@@ -103,6 +139,7 @@ async def lifespan(app: FastAPI):
 
     # Start scheduled sync if configured
     _setup_scheduler()
+    _setup_trip_scheduler()
 
     yield
 
@@ -144,6 +181,7 @@ app.include_router(leave.router)
 app.include_router(export.router)
 app.include_router(sync.router)
 app.include_router(analytics.router)
+app.include_router(trip.router)
 
 
 # Health check endpoint
