@@ -1,5 +1,5 @@
 <script setup>
-import { CalendarDays, RefreshCw, Download, LogOut, Shield, FileSpreadsheet, BarChart3 } from 'lucide-vue-next'
+import { CalendarDays, RefreshCw, Download, LogOut, Shield, FileSpreadsheet, BarChart3, Briefcase } from 'lucide-vue-next'
 
 const props = defineProps({
   syncing: { type: Boolean, default: false },
@@ -31,6 +31,15 @@ const emit = defineEmits(['sync', 'export', 'page-change', 'logout'])
           @click="emit('page-change', 'export')"
         >
           数据导出
+        </button>
+        <button
+          class="px-3 py-1.5 text-[13px] rounded-md transition-colors"
+          :class="activePage === 'trip'
+            ? 'bg-highlight text-accent font-semibold'
+            : 'text-text-secondary font-medium hover:text-text-primary'"
+          @click="emit('page-change', 'trip')"
+        >
+          外出/出差
         </button>
         <button
           class="px-3 py-1.5 text-[13px] rounded-md transition-colors"
@@ -154,6 +163,14 @@ const emit = defineEmits(['sync', 'export', 'page-change', 'logout'])
     >
       <FileSpreadsheet :size="20" :stroke-width="activePage === 'export' ? 2.2 : 1.6" />
       <span class="text-[10px] font-medium">数据导出</span>
+    </button>
+    <button
+      class="flex-1 flex flex-col items-center justify-center gap-0.5 py-2 transition-colors"
+      :class="activePage === 'trip' ? 'text-accent' : 'text-text-tertiary'"
+      @click="emit('page-change', 'trip')"
+    >
+      <Briefcase :size="20" :stroke-width="activePage === 'trip' ? 2.2 : 1.6" />
+      <span class="text-[10px] font-medium">外出/出差</span>
     </button>
     <button
       class="flex-1 flex flex-col items-center justify-center gap-0.5 py-2 transition-colors"
