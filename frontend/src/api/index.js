@@ -220,5 +220,95 @@ export default {
 
   getEmployeeRanking(year, limit = 10) {
     return api.get('/analytics/employee-ranking', { params: { year, limit } })
-  }
+  },
+
+  // --- Trip (business trip / out-of-office) API ---
+
+  /**
+   * Get monthly trip summary data (paginated)
+   */
+  getTripMonthlySummary(params) {
+    return api.get('/trip/monthly-summary', {
+      params: {
+        year: params.year,
+        deptId: params.deptId || undefined,
+        tripType: params.tripType || undefined,
+        employeeName: params.employeeName || undefined,
+        page: params.page || 1,
+        pageSize: params.pageSize || 10,
+        sortBy: params.sortBy || undefined,
+        sortOrder: params.sortOrder || 'desc',
+      }
+    })
+  },
+
+  /**
+   * Get daily trip detail records for an employee in a specific month
+   */
+  getTripDailyDetail(params) {
+    return api.get('/trip/daily-detail', {
+      params: { employeeId: params.employeeId, year: params.year, month: params.month }
+    })
+  },
+
+  /**
+   * Get today's trip/outing list
+   */
+  getTripToday(params = {}) {
+    return api.get('/trip/today', {
+      params: {
+        deptId: params.deptId || undefined,
+        tripType: params.tripType || undefined,
+        employeeName: params.employeeName || undefined,
+      }
+    })
+  },
+
+  /**
+   * Get trip aggregate stats for a year
+   */
+  getTripStats(params) {
+    return api.get('/trip/stats', {
+      params: {
+        year: params.year,
+        deptId: params.deptId || undefined,
+        tripType: params.tripType || undefined,
+        employeeName: params.employeeName || undefined,
+      }
+    })
+  },
+
+  /**
+   * Get per-day trip/outing headcount for a given month
+   */
+  getTripDailyCount(params) {
+    return api.get('/trip/daily-count', {
+      params: {
+        year: params.year, month: params.month,
+        deptId: params.deptId || undefined,
+        tripType: params.tripType || undefined,
+        employeeName: params.employeeName || undefined,
+      }
+    })
+  },
+
+  /**
+   * Export trip data as Excel file (returns blob)
+   */
+  exportTripExcel(params) {
+    return api.post('/trip/export', {
+      year: params.year,
+      deptId: params.deptId || null,
+      tripType: params.tripType || null,
+      employeeName: params.employeeName || null,
+    }, { responseType: 'blob' })
+  },
+
+  /**
+   * Trigger trip data sync from DingTalk
+   * @param {string|null} month - optional YYYY-MM format to force-sync a specific month
+   */
+  triggerTripSync(month) {
+    return api.post('/trip/sync', { month: month || null })
+  },
 }
