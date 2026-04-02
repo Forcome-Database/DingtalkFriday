@@ -247,7 +247,7 @@ onMounted(async () => {
         :today-leave-count="todayLeaveCount"
         :today-trip-count="(tripStats.todayTripCount || 0) + (tripStats.todayOutingCount || 0)"
         @today-leave-click="fetchTodayLeaveDetail"
-        @today-trip-click="activePage = 'trip'"
+        @today-trip-click="fetchTodayTripDetail('')"
       />
 
       <!-- Tab switcher -->
@@ -375,14 +375,6 @@ onMounted(async () => {
         @month-change="setDailyTripMonth"
       />
 
-      <TripTodayModal
-        :visible="todayTripVisible"
-        :detail="todayTripDetail"
-        :loading="todayTripLoading"
-        :tripType="todayTripType"
-        @close="closeTodayTrip"
-      />
-
       <TripCalendarModal
         :visible="tripCalendarVisible"
         :data="tripCalendarData"
@@ -414,6 +406,15 @@ onMounted(async () => {
       :loading="todayLeaveLoading"
       :leave-type-options="leaveTypeOptions"
       @close="closeTodayLeave"
+    />
+
+    <!-- Today trip detail modal (page-level so it works from any page) -->
+    <TripTodayModal
+      :visible="todayTripVisible"
+      :detail="todayTripDetail"
+      :loading="todayTripLoading"
+      :tripType="todayTripType"
+      @close="closeTodayTrip"
     />
   </div>
 </template>
