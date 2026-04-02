@@ -116,6 +116,9 @@ const activeTripTab = ref('table')
 /** Whether export is in progress */
 const exporting = ref(false)
 
+/** Whether trip export is in progress */
+const tripExporting = ref(false)
+
 /**
  * Handle export button click
  */
@@ -125,6 +128,30 @@ async function handleExport() {
     await exportExcel()
   } finally {
     exporting.value = false
+  }
+}
+
+/**
+ * Handle trip sync button click
+ */
+function handleTripSync() {
+  triggerTripSync()
+  // Refresh data after a delay to allow sync to process some records
+  setTimeout(() => {
+    fetchTripData()
+    fetchDailyTripCount()
+  }, 5000)
+}
+
+/**
+ * Handle trip export button click
+ */
+async function handleTripExport() {
+  tripExporting.value = true
+  try {
+    await exportTripExcel()
+  } finally {
+    tripExporting.value = false
   }
 }
 
@@ -176,12 +203,16 @@ onMounted(async () => {
     <AppHeader
       :syncing="syncing"
       :exporting="exporting"
+      :trip-syncing="tripSyncing"
+      :trip-exporting="tripExporting"
       :sync-year="filters.year"
       :active-page="activePage"
       :current-user="currentUser"
       :is-admin="isAdmin"
       @sync="triggerSync(filters.year)"
       @export="handleExport"
+      @trip-sync="handleTripSync"
+      @trip-export="handleTripExport"
       @page-change="activePage = $event"
       @logout="handleLogout"
     />
