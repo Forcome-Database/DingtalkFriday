@@ -9,6 +9,7 @@ import StatsCards from '../components/StatsCards.vue'
 import DataTable from '../components/DataTable.vue'
 import DailyLeaveStats from '../components/DailyLeaveStats.vue'
 import LeaveCalendarModal from '../components/LeaveCalendarModal.vue'
+import TodayLeaveModal from '../components/TodayLeaveModal.vue'
 import AnalyticsView from '../components/AnalyticsView.vue'
 import AdminPanel from '../components/AdminPanel.vue'
 
@@ -36,6 +37,9 @@ const {
   dailyLeaveData,
   dailyLeaveLoading,
   todayLeaveCount,
+  todayLeaveVisible,
+  todayLeaveDetail,
+  todayLeaveLoading,
   syncing,
   yearOptions,
 
@@ -55,7 +59,9 @@ const {
   toggleSort,
   setUnit,
   triggerSync,
-  exportExcel
+  exportExcel,
+  fetchTodayLeaveDetail,
+  closeTodayLeave
 } = useLeaveData()
 
 /** Active page: 'export' (default), 'analytics', or 'admin' */
@@ -155,7 +161,12 @@ onMounted(async () => {
       />
 
       <!-- Statistics cards -->
-      <StatsCards :stats="stats" :unit="filters.unit" :today-leave-count="todayLeaveCount" />
+      <StatsCards
+        :stats="stats"
+        :unit="filters.unit"
+        :today-leave-count="todayLeaveCount"
+        @today-leave-click="fetchTodayLeaveDetail"
+      />
 
       <!-- Tab switcher -->
       <div class="flex items-center gap-1 border-b border-border-default">
@@ -230,6 +241,15 @@ onMounted(async () => {
       :loading="calendarLoading"
       :selected-cell="selectedCell"
       @close="closeCalendar"
+    />
+
+    <!-- Today leave detail modal -->
+    <TodayLeaveModal
+      :visible="todayLeaveVisible"
+      :data="todayLeaveDetail"
+      :loading="todayLeaveLoading"
+      :leave-type-options="leaveTypeOptions"
+      @close="closeTodayLeave"
     />
   </div>
 </template>
