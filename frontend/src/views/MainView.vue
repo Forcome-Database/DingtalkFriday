@@ -2,6 +2,7 @@
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useLeaveData } from '../composables/useLeaveData.js'
+import { useTripData } from '../composables/useTripData.js'
 import { useAuth } from '../composables/useAuth.js'
 import AppHeader from '../components/AppHeader.vue'
 import FilterPanel from '../components/FilterPanel.vue'
@@ -10,6 +11,11 @@ import DataTable from '../components/DataTable.vue'
 import DailyLeaveStats from '../components/DailyLeaveStats.vue'
 import LeaveCalendarModal from '../components/LeaveCalendarModal.vue'
 import TodayLeaveModal from '../components/TodayLeaveModal.vue'
+import TripFilterPanel from '../components/TripFilterPanel.vue'
+import TripStatsCards from '../components/TripStatsCards.vue'
+import TripDataTable from '../components/TripDataTable.vue'
+import TripDailyStats from '../components/TripDailyStats.vue'
+import TripTodayModal from '../components/TripTodayModal.vue'
 import AnalyticsView from '../components/AnalyticsView.vue'
 import AdminPanel from '../components/AdminPanel.vue'
 
@@ -64,11 +70,48 @@ const {
   closeTodayLeave
 } = useLeaveData()
 
-/** Active page: 'export' (default), 'analytics', or 'admin' */
+const {
+  filters: tripFilters,
+  departments1: tripDepts1,
+  departments2: tripDepts2,
+  tableData: tripTableData,
+  summaryRow: tripSummaryRow,
+  stats: tripStats,
+  pagination: tripPagination,
+  sortBy: tripSortBy,
+  sortOrder: tripSortOrder,
+  loading: tripLoading,
+  dailyTripMonth, dailyTripData, dailyTripLoading,
+  todayTripVisible, todayTripDetail, todayTripLoading, todayTripType,
+  calendarVisible: tripCalendarVisible,
+  calendarData: tripCalendarData,
+  calendarLoading: tripCalendarLoading,
+  selectedCell: tripSelectedCell,
+  syncing: tripSyncing,
+  yearOptions: tripYearOptions,
+  loadDepartments1: loadTripDepts1,
+  loadDepartments2: loadTripDepts2,
+  fetchData: fetchTripData,
+  fetchDailyTripCount, setDailyTripMonth,
+  fetchDailyDetail: fetchTripDailyDetail,
+  closeCalendar: closeTripCalendar,
+  fetchTodayTripDetail, closeTodayTrip,
+  search: tripSearch,
+  resetFilters: tripResetFilters,
+  goToPage: tripGoToPage,
+  setPageSize: tripSetPageSize,
+  toggleSort: tripToggleSort,
+  triggerTripSync, exportTripExcel,
+} = useTripData()
+
+/** Active page: 'export' (default), 'trip', 'analytics', or 'admin' */
 const activePage = ref('export')
 
 /** Active tab: 'table' (default) or 'daily' */
 const activeTab = ref('table')
+
+/** Active trip tab: 'table' (default) or 'daily' */
+const activeTripTab = ref('table')
 
 /** Whether export is in progress */
 const exporting = ref(false)
@@ -119,6 +162,11 @@ onMounted(async () => {
   refreshUser()
   await Promise.all([loadDepartments1(), loadLeaveTypes()])
   await fetchData()
+
+  // Initialize trip data
+  loadTripDepts1()
+  fetchTripData()
+  fetchDailyTripCount()
 })
 </script>
 
@@ -225,6 +273,80 @@ onMounted(async () => {
         :year="filters.year"
         :loading="dailyLeaveLoading"
         @month-change="setDailyLeaveMonth"
+      />
+    </div>
+
+    <!-- Trip Page -->
+    <div v-if="activePage === 'trip'" class="p-4 sm:p-6 lg:p-8 space-y-4 sm:space-y-6">
+      <div>
+        <h2 class="text-lg sm:text-xl font-bold text-text-primary">外出/出差统计</h2>
+        <p class="text-[13px] text-text-secondary mt-1">查看员工出差和外出记录统计</p>
+      </div>
+
+      <TripFilterPanel
+        :filters="tripFilters"
+        :departments1="tripDepts1"
+        :departments2="tripDepts2"
+        :yearOptions="tripYearOptions"
+        :loading="tripLoading"
+        @update:filters="Object.assign(tripFilters, $event)"
+        @dept1Change="loadTripDepts2"
+        @search="tripSearch"
+        @reset="tripResetFilters"
+      />
+
+      <TripStatsCards
+        :stats="tripStats"
+        @todayTripClick="fetchTodayTripDetail('出差')"
+        @todayOutingClick="fetchTodayTripDetail('外出')"
+      />
+
+      <!-- Tab switcher -->
+      <div class="flex gap-1 bg-surface-secondary rounded-lg p-1 w-fit">
+        <button
+          class="px-4 py-1.5 rounded-md text-[13px] font-medium transition-colors"
+          :class="activeTripTab === 'table' ? 'bg-white text-accent shadow-sm' : 'text-text-secondary hover:text-text-primary'"
+          @click="activeTripTab = 'table'"
+        >
+          出差/外出列表
+        </button>
+        <button
+          class="px-4 py-1.5 rounded-md text-[13px] font-medium transition-colors"
+          :class="activeTripTab === 'daily' ? 'bg-white text-accent shadow-sm' : 'text-text-secondary hover:text-text-primary'"
+          @click="activeTripTab = 'daily'; fetchDailyTripCount()"
+        >
+          每日统计
+        </button>
+      </div>
+
+      <TripDataTable
+        v-if="activeTripTab === 'table'"
+        :tableData="tripTableData"
+        :summaryRow="tripSummaryRow"
+        :pagination="tripPagination"
+        :sortBy="tripSortBy"
+        :sortOrder="tripSortOrder"
+        :loading="tripLoading"
+        @sort="tripToggleSort"
+        @page-change="tripGoToPage"
+        @page-size-change="tripSetPageSize"
+        @cell-click="(empId, name, month) => fetchTripDailyDetail(empId, name, tripFilters.year, month)"
+      />
+
+      <TripDailyStats
+        v-if="activeTripTab === 'daily'"
+        :dailyData="dailyTripData"
+        :month="dailyTripMonth"
+        :loading="dailyTripLoading"
+        @month-change="setDailyTripMonth"
+      />
+
+      <TripTodayModal
+        :visible="todayTripVisible"
+        :detail="todayTripDetail"
+        :loading="todayTripLoading"
+        :tripType="todayTripType"
+        @close="closeTodayTrip"
       />
     </div>
 
