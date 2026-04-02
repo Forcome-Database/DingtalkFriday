@@ -186,7 +186,15 @@ async def get_trip_daily_detail(
     year: int,
     month: int,
 ) -> dict:
-    """Get daily trip records for one employee in a given month."""
+    """Get daily trip records for one employee in a given month.
+
+    Returns format matching LeaveCalendarModal expectations:
+    {
+        employee: { name, dept },
+        records: [{ date, startTime, endTime, hours, leaveType, status }],
+        summary: { totalDays, totalHours },
+    }
+    """
     month_start = f"{year}-{month:02d}-01"
     if month == 12:
         month_end = f"{year}-12-31"
@@ -194,11 +202,11 @@ async def get_trip_daily_detail(
         month_end = f"{year}-{month + 1:02d}-01"
 
     async with async_session() as session:
-        # Get employee name
+        # Get employee info
         emp_result = await session.execute(
-            select(Employee.name).where(Employee.userid == employee_id)
+            select(Employee).where(Employee.userid == employee_id)
         )
-        emp_name = emp_result.scalar_one_or_none() or employee_id
+        emp = emp_result.scalar_one_or_none()
 
         result = await session.execute(
             select(TripRecord).where(
@@ -209,18 +217,33 @@ async def get_trip_daily_detail(
         )
         records = result.scalars().all()
 
+        total_hours = sum(r.duration_hours or 0 for r in records)
+        total_days = round(total_hours / 8.0, 1)
+
         return {
-            "employeeName": emp_name,
+            "employee": {
+                "name": emp.name if emp else employee_id,
+                "dept": emp.dept_name or "" if emp else "",
+            },
+            "employeeName": emp.name if emp else employee_id,
             "records": [
                 {
                     "date": r.work_date,
+                    "startTime": r.begin_time,
+                    "endTime": r.end_time,
+                    "hours": r.duration_hours or 0,
+                    "leaveType": r.tag_name,
                     "tagName": r.tag_name,
                     "durationHours": r.duration_hours,
                     "beginTime": r.begin_time,
-                    "endTime": r.end_time,
+                    "status": "已审批",
                 }
                 for r in records
             ],
+            "summary": {
+                "totalDays": total_days,
+                "totalHours": round(total_hours, 1),
+            },
         }
 
 

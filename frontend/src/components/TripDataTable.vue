@@ -79,7 +79,7 @@ function onCellClick(employee, monthIndex) {
   const monthStr = String(monthIndex + 1)
   const val = employee.months?.[monthStr]
   if (!isClickable(val)) return
-  emit('cell-click', employee.employeeId, employee.employeeName, monthIndex + 1)
+  emit('cell-click', employee.employeeId, employee.employeeName, employee.deptName, monthIndex + 1)
 }
 
 /**

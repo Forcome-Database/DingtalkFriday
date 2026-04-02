@@ -157,8 +157,8 @@ export function useTripData() {
   /**
    * Fetch daily detail for one employee (opens calendar modal)
    */
-  async function fetchDailyDetail(employeeId, employeeName, year, month) {
-    selectedCell.value = { employeeId, employeeName, year, month }
+  async function fetchDailyDetail(employeeId, employeeName, dept, year, month) {
+    selectedCell.value = { employeeId, employeeName, dept, year, month }
     calendarVisible.value = true
     calendarLoading.value = true
     try {

@@ -16,6 +16,7 @@ import TripStatsCards from '../components/TripStatsCards.vue'
 import TripDataTable from '../components/TripDataTable.vue'
 import TripDailyStats from '../components/TripDailyStats.vue'
 import TripTodayModal from '../components/TripTodayModal.vue'
+import TripCalendarModal from '../components/TripCalendarModal.vue'
 import AnalyticsView from '../components/AnalyticsView.vue'
 import AdminPanel from '../components/AdminPanel.vue'
 
@@ -363,7 +364,7 @@ onMounted(async () => {
         @sort="tripToggleSort"
         @page-change="tripGoToPage"
         @page-size-change="tripSetPageSize"
-        @cell-click="(empId, name, month) => fetchTripDailyDetail(empId, name, tripFilters.year, month)"
+        @cell-click="(empId, name, dept, month) => fetchTripDailyDetail(empId, name, dept, tripFilters.year, month)"
       />
 
       <TripDailyStats
@@ -380,6 +381,14 @@ onMounted(async () => {
         :loading="todayTripLoading"
         :tripType="todayTripType"
         @close="closeTodayTrip"
+      />
+
+      <TripCalendarModal
+        :visible="tripCalendarVisible"
+        :data="tripCalendarData"
+        :loading="tripCalendarLoading"
+        :selectedCell="tripSelectedCell"
+        @close="closeTripCalendar"
       />
     </div>
 
