@@ -298,20 +298,38 @@ async def get_trip_today(
         result = await session.execute(query)
         rows = result.all()
 
-        return {
-            "list": [
-                {
-                    "employeeId": trip.userid,
-                    "employeeName": emp.name,
-                    "deptName": emp.dept_name,
-                    "tagName": trip.tag_name,
-                    "beginTime": trip.begin_time,
-                    "endTime": trip.end_time,
-                    "durationHours": trip.duration_hours,
-                }
-                for trip, emp in rows
-            ],
-        }
+        items = []
+        for trip, emp in rows:
+            # Compute today's display time from the full approval range
+            rec_start = trip.begin_time or ""
+            rec_end = trip.end_time or ""
+            rec_start_date = rec_start[:10] if len(rec_start) >= 10 else ""
+            rec_end_date = rec_end[:10] if len(rec_end) >= 10 else ""
+
+            if today_str == rec_start_date and today_str == rec_end_date:
+                start_display = rec_start[11:16] if len(rec_start) >= 16 else "09:00"
+                end_display = rec_end[11:16] if len(rec_end) >= 16 else "18:00"
+            elif today_str == rec_start_date:
+                start_display = rec_start[11:16] if len(rec_start) >= 16 else "09:00"
+                end_display = "18:00"
+            elif today_str == rec_end_date:
+                start_display = "09:00"
+                end_display = rec_end[11:16] if len(rec_end) >= 16 else "18:00"
+            else:
+                start_display = "09:00"
+                end_display = "18:00"
+
+            items.append({
+                "employeeId": trip.userid,
+                "employeeName": emp.name,
+                "deptName": emp.dept_name,
+                "tagName": trip.tag_name,
+                "beginTime": start_display,
+                "endTime": end_display,
+                "durationHours": trip.duration_hours,
+            })
+
+        return {"list": items}
 
 
 async def get_trip_daily_count(
