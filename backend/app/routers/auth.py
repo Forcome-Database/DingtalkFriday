@@ -20,6 +20,7 @@ from app.schemas import (
     AuthConfigResponse,
     DingTalkLoginRequest,
     LoginResponse,
+    PhoneLoginRequest,
     UserInfo,
 )
 
@@ -29,8 +30,11 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 @router.get("/config", response_model=AuthConfigResponse)
 async def auth_config():
-    """Return DingTalk corpId for frontend JSAPI initialization."""
-    return AuthConfigResponse(corpId=settings.dingtalk_corp_id)
+    """Return DingTalk corpId and dev mode flag for frontend initialization."""
+    return AuthConfigResponse(
+        corpId=settings.dingtalk_corp_id,
+        devMode=settings.dev_mode,
+    )
 
 
 @router.post("/dingtalk", response_model=LoginResponse)
@@ -125,6 +129,65 @@ async def dingtalk_login(request: DingTalkLoginRequest):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"DingTalk login failed: {e}",
         )
+
+
+@router.post("/dev-login", response_model=LoginResponse)
+async def dev_login(request: PhoneLoginRequest):
+    """
+    Dev-only login: bypass DingTalk OAuth and login with phone number directly.
+    Only available when DEV_MODE=true.
+    """
+    if not settings.dev_mode:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Not found",
+        )
+
+    mobile = request.mobile.strip()
+    if not mobile:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="手机号不能为空",
+        )
+
+    admin_phones = _get_admin_phones()
+    is_admin = mobile in admin_phones
+
+    # Look up employee by mobile
+    async with async_session() as session:
+        result = await session.execute(
+            select(Employee).where(Employee.mobile == mobile)
+        )
+        emp = result.scalar_one_or_none()
+
+    # Check allowed_user or admin
+    async with async_session() as session:
+        result = await session.execute(
+            select(AllowedUser).where(AllowedUser.mobile == mobile)
+        )
+        allowed = result.scalar_one_or_none()
+
+    if not allowed and not is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="您没有访问权限，请联系管理员开通",
+        )
+
+    userid = emp.userid if emp else (allowed.userid if allowed else f"dev_{mobile}")
+    name = emp.name if emp else (allowed.name if allowed else f"Dev-{mobile}")
+    avatar = emp.avatar if emp else None
+
+    token = create_token(userid=userid, name=name, mobile=mobile)
+    return LoginResponse(
+        token=token,
+        user=UserInfo(
+            userid=userid,
+            name=name,
+            mobile=mobile,
+            avatar=avatar,
+            isAdmin=is_admin,
+        ),
+    )
 
 
 @router.get("/me", response_model=UserInfo)

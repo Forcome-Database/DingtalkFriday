@@ -36,6 +36,18 @@ export function useAuth() {
   }
 
   /**
+   * Dev mode login by phone number.
+   * @param {string} mobile - Phone number
+   */
+  async function devLogin(mobile) {
+    const res = await api.devLogin({ mobile })
+    token.value = res.token
+    currentUser.value = res.user
+    setToken(res.token)
+    setUser(res.user)
+  }
+
+  /**
    * Clear auth state and redirect to login page.
    */
   function logout() {
@@ -66,6 +78,7 @@ export function useAuth() {
     isAdmin,
     isInDingTalk,
     loginWithDingTalk,
+    devLogin,
     logout,
     refreshUser,
   }

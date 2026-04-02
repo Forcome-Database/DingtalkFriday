@@ -44,6 +44,9 @@ class Settings(BaseSettings):
     # DingTalk Corp ID (required for H5 micro-app login)
     dingtalk_corp_id: str = ""
 
+    # Dev mode: enable phone-based login bypass (NEVER enable in production)
+    dev_mode: bool = False
+
 
 # Singleton settings instance
 settings = Settings()

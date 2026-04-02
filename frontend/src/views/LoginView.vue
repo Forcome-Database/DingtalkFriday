@@ -1,17 +1,20 @@
 <script setup>
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { CalendarDays, Loader2, AlertCircle, Smartphone } from 'lucide-vue-next'
+import { CalendarDays, Loader2, AlertCircle, Smartphone, LogIn } from 'lucide-vue-next'
 import { useAuth } from '../composables/useAuth.js'
 import api from '../api/index.js'
 import { isInDingTalk } from '../utils/auth.js'
 
 const router = useRouter()
-const { loginWithDingTalk } = useAuth()
+const { loginWithDingTalk, devLogin } = useAuth()
 
 const loading = ref(false)
 const error = ref('')
 const isDingTalk = ref(false)
+const devMode = ref(false)
+const phoneInput = ref('')
+const phoneLoading = ref(false)
 
 /**
  * DingTalk H5 login: load JSAPI and request auth code
@@ -24,6 +27,7 @@ async function initDingTalkLogin() {
     // Get corpId from backend
     const config = await api.getAuthConfig()
     const corpId = config.corpId
+    devMode.value = config.devMode || false
 
     if (!corpId) {
       error.value = '系统未配置企业ID，请联系管理员'
@@ -60,6 +64,39 @@ async function initDingTalkLogin() {
 }
 
 /**
+ * Check if dev mode is enabled (for non-DingTalk browsers)
+ */
+async function checkDevMode() {
+  try {
+    const config = await api.getAuthConfig()
+    devMode.value = config.devMode || false
+  } catch {
+    devMode.value = false
+  }
+}
+
+/**
+ * Dev login by phone number
+ */
+async function handleDevLogin() {
+  const mobile = phoneInput.value.trim()
+  if (!mobile) {
+    error.value = '请输入手机号'
+    return
+  }
+  phoneLoading.value = true
+  error.value = ''
+  try {
+    await devLogin(mobile)
+    router.push('/')
+  } catch (e) {
+    error.value = e.response?.data?.detail || '登录失败'
+  } finally {
+    phoneLoading.value = false
+  }
+}
+
+/**
  * Dynamically load DingTalk JSAPI script
  */
 function loadDingTalkJSAPI() {
@@ -80,6 +117,8 @@ onMounted(() => {
   isDingTalk.value = isInDingTalk()
   if (isDingTalk.value) {
     initDingTalkLogin()
+  } else {
+    checkDevMode()
   }
 })
 </script>
@@ -118,20 +157,53 @@ onMounted(() => {
         </div>
       </div>
 
-      <!-- Non-DingTalk browser: show instructions -->
+      <!-- Non-DingTalk browser: dev login or instructions -->
       <div v-else class="bg-white rounded-xl shadow-sm border border-border-default p-6 text-center space-y-4">
-        <Smartphone class="text-text-tertiary mx-auto" :size="40" :stroke-width="1.5" />
-        <div>
-          <p class="text-sm font-medium text-text-primary">请在钉钉中打开</p>
-          <p class="text-xs text-text-tertiary mt-2">
-            本系统仅支持通过钉钉工作台登录访问，<br/>请打开钉钉 → 工作台 → 找到本应用
-          </p>
-        </div>
-        <div class="pt-2 border-t border-border-default">
-          <p class="text-xs text-text-tertiary">
-            如需开通权限，请联系管理员
-          </p>
-        </div>
+        <!-- Dev mode: phone login form -->
+        <template v-if="devMode">
+          <div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-50 text-amber-600 text-xs font-medium">
+            <span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+            开发模式
+          </div>
+          <div class="space-y-3">
+            <input
+              v-model="phoneInput"
+              type="tel"
+              placeholder="输入手机号登录"
+              class="w-full px-4 py-2.5 text-sm border border-border-default rounded-lg focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent transition-colors"
+              @keyup.enter="handleDevLogin"
+            />
+            <button
+              class="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-white bg-accent rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+              :disabled="phoneLoading"
+              @click="handleDevLogin"
+            >
+              <Loader2 v-if="phoneLoading" class="animate-spin" :size="16" />
+              <LogIn v-else :size="16" />
+              登录
+            </button>
+          </div>
+          <div v-if="error" class="flex items-center gap-2 text-red-600 justify-center">
+            <AlertCircle :size="14" />
+            <span class="text-xs">{{ error }}</span>
+          </div>
+        </template>
+
+        <!-- Not dev mode: show instructions -->
+        <template v-else>
+          <Smartphone class="text-text-tertiary mx-auto" :size="40" :stroke-width="1.5" />
+          <div>
+            <p class="text-sm font-medium text-text-primary">请在钉钉中打开</p>
+            <p class="text-xs text-text-tertiary mt-2">
+              本系统仅支持通过钉钉工作台登录访问，<br/>请打开钉钉 → 工作台 → 找到本应用
+            </p>
+          </div>
+          <div class="pt-2 border-t border-border-default">
+            <p class="text-xs text-text-tertiary">
+              如需开通权限，请联系管理员
+            </p>
+          </div>
+        </template>
       </div>
     </div>
   </div>

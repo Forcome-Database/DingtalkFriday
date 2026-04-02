@@ -40,6 +40,7 @@ class LoginResponse(BaseModel):
 class AuthConfigResponse(BaseModel):
     """Response for GET /api/auth/config."""
     corpId: str
+    devMode: bool = False
 
 
 # ---------------------------------------------------------------------------

@@ -57,6 +57,14 @@ export default {
   },
 
   /**
+   * Dev mode login by phone number (only when DEV_MODE=true)
+   * @param {{ mobile: string }} data
+   */
+  devLogin(data) {
+    return api.post('/auth/dev-login', data)
+  },
+
+  /**
    * Get current user info
    */
   getMe() {
