@@ -358,7 +358,7 @@ git commit -m "feat: add get_update_data DingTalk API wrapper"
 **Files:**
 - Create: `backend/app/services/trip_sync.py`
 
-- [ ] **Step 1: Create trip_sync.py with sync logic**
+- [x] **Step 1: Create trip_sync.py with sync logic**
 
 Create `backend/app/services/trip_sync.py`:
 
@@ -669,7 +669,7 @@ async def sync_trip_records(force_month: Optional[str] = None) -> str:
         raise
 ```
 
-- [ ] **Step 2: Verify module imports**
+- [x] **Step 2: Verify module imports**
 
 ```bash
 cd backend && python -c "from app.services.trip_sync import sync_trip_records; print('Import OK')"
@@ -677,7 +677,7 @@ cd backend && python -c "from app.services.trip_sync import sync_trip_records; p
 
 Expected: `Import OK`
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add backend/app/services/trip_sync.py
