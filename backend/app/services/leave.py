@@ -463,16 +463,6 @@ async def get_daily_detail(
         rec_end_date = end_dt.date()
         calendar_day_leave = _is_calendar_day_leave(rec.leave_type)
 
-        # 计算每日小时数（用整条记录的完整时长来算每天份额）
-        if calendar_day_leave:
-            # 产假/婚假: 按自然日计算，每天8小时
-            hours_per_day = 8.0
-        else:
-            # 普通假期: 用整条记录的完整小时数 / 总工作日数
-            full_hours = _convert_duration(rec.duration_percent, rec.duration_unit, "hour", hpd)
-            workday_count = _count_workdays(rec_start_date, rec_end_date)
-            hours_per_day = round(full_hours / workday_count, 1) if workday_count > 0 else round(full_hours, 1)
-
         # Clamp to current month boundaries
         day_from = max(rec_start_date, month_start_date)
         day_to = min(rec_end_date, month_end_date)
@@ -494,11 +484,24 @@ async def get_daily_detail(
             else:
                 end_time_str = "18:00"
 
+            # 计算当天实际小时数
+            if rec_start_date == rec_end_date:
+                # 同天记录：用钉钉原始时长
+                day_hours = _convert_duration(rec.duration_percent, rec.duration_unit, "hour", hpd)
+            elif calendar_day_leave:
+                day_hours = 8.0
+            else:
+                # 跨天记录：按当天时段计算，扣除午休
+                eff_s = start_dt.hour + start_dt.minute / 60.0 if current == rec_start_date else 9.0
+                eff_e = end_dt.hour + end_dt.minute / 60.0 if current == rec_end_date else 18.0
+                lunch = max(0.0, min(eff_e, 13.0) - max(eff_s, 12.0))
+                day_hours = eff_e - eff_s - lunch
+
             detail_records.append({
                 "date": current.isoformat(),
                 "startTime": start_time_str,
                 "endTime": end_time_str,
-                "hours": hours_per_day,
+                "hours": round(day_hours, 1),
                 "leaveType": rec.leave_type or "请假",
                 "status": rec.status or "已审批",
             })
