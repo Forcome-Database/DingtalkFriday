@@ -303,6 +303,33 @@ class EmployeeRankingResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Today leave detail schemas
+# ---------------------------------------------------------------------------
+
+class TodayLeaveRecord(BaseModel):
+    """Single leave record for today's leave detail."""
+    userid: str
+    name: str
+    avatar: Optional[str] = None
+    deptName: str
+    leaveType: str
+    leaveCode: Optional[str] = None
+    startTime: int = Field(description="Start time (Unix ms)")
+    endTime: int = Field(description="End time (Unix ms)")
+    durationPercent: int
+    durationUnit: str
+    durationDisplay: str = Field(description="e.g. '5小时' or '1天'")
+    timeDisplay: str = Field(description="e.g. '09:00 - 14:00'")
+    status: str
+
+
+class TodayLeaveDetailResponse(BaseModel):
+    """Response for GET /api/leave/today-detail."""
+    count: int = Field(description="Distinct person count on leave today")
+    records: List[TodayLeaveRecord]
+
+
+# ---------------------------------------------------------------------------
 # Generic response wrapper
 # ---------------------------------------------------------------------------
 
