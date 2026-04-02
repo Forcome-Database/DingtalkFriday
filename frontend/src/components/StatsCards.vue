@@ -24,6 +24,8 @@ const props = defineProps({
     default: 0
   }
 })
+
+const emit = defineEmits(['todayLeaveClick'])
 </script>
 
 <template>
@@ -95,7 +97,10 @@ const props = defineProps({
     </div>
 
     <!-- Card 5: Today's leave count -->
-    <div class="rounded-xl border-[1.5px] border-border-default p-4 sm:p-5">
+    <div
+      class="rounded-xl border-[1.5px] border-border-default p-4 sm:p-5 cursor-pointer hover:border-accent hover:shadow-sm transition-all"
+      @click="emit('todayLeaveClick')"
+    >
       <div class="flex items-center justify-between mb-2">
         <span class="text-[13px] font-medium text-text-secondary">今日请假</span>
         <div class="w-9 h-9 rounded-lg bg-red-50 flex items-center justify-center">
