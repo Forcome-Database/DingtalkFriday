@@ -654,3 +654,133 @@ async def get_daily_leave_count(
         "days": days,
         "maxCount": max_count,
     }
+
+
+# ---------------------------------------------------------------------------
+# Today leave detail
+# ---------------------------------------------------------------------------
+
+async def get_today_leave_detail(
+    dept_id: Optional[int] = None,
+    leave_types: Optional[List[str]] = None,
+    employee_name: Optional[str] = None,
+) -> dict:
+    """
+    Get detailed leave records for today.
+
+    Returns a dict matching TodayLeaveDetailResponse schema:
+    {
+        count: int  -- distinct person count on leave today,
+        records: [{ userid, name, avatar, deptName, leaveType, leaveCode,
+                     startTime, endTime, durationPercent, durationUnit,
+                     durationDisplay, timeDisplay, status }],
+    }
+    """
+    today = date_type.today()
+    today_start_ms = int(datetime(today.year, today.month, today.day, 0, 0, 0).timestamp() * 1000)
+    today_end_ms = int(datetime(today.year, today.month, today.day, 23, 59, 59).timestamp() * 1000)
+
+    async with async_session() as session:
+        # Employee filter (same logic as get_daily_leave_count)
+        emp_conditions = []
+        if dept_id is not None:
+            all_dept_ids = await _get_descendant_dept_ids(session, dept_id)
+            emp_conditions.append(Employee.dept_id.in_(all_dept_ids))
+        if employee_name:
+            emp_conditions.append(Employee.name.contains(employee_name))
+
+        emp_query = select(Employee)
+        if emp_conditions:
+            emp_query = emp_query.where(and_(*emp_conditions))
+
+        emp_result = await session.execute(emp_query)
+        employees = emp_result.scalars().all()
+        emp_map = {e.userid: e for e in employees}
+        emp_userids = set(emp_map.keys())
+
+        if not emp_userids:
+            return {"count": 0, "records": []}
+
+        # Overlap query: records that intersect with today
+        lr_conditions = [
+            LeaveRecord.end_time >= today_start_ms,
+            LeaveRecord.start_time <= today_end_ms,
+            LeaveRecord.userid.in_(emp_userids),
+        ]
+        if leave_types:
+            lr_conditions.append(LeaveRecord.leave_type.in_(leave_types))
+
+        lr_query = select(LeaveRecord).where(and_(*lr_conditions)).order_by(LeaveRecord.start_time)
+        lr_result = await session.execute(lr_query)
+        records = lr_result.scalars().all()
+
+    type_map = await _get_leave_type_map()
+    result_records = []
+    person_ids = set()
+
+    for rec in records:
+        uid = rec.userid
+        if uid not in emp_userids:
+            continue
+
+        emp = emp_map.get(uid)
+        if not emp:
+            continue
+
+        calendar_day_leave = _is_calendar_day_leave(rec.leave_type)
+        if not calendar_day_leave and not _is_workday(today):
+            continue
+
+        person_ids.add(uid)
+
+        start_dt = _ms_to_datetime(rec.start_time)
+        end_dt = _ms_to_datetime(rec.end_time)
+        rec_start_date = start_dt.date()
+        rec_end_date = end_dt.date()
+
+        # Build timeDisplay
+        if rec_start_date == rec_end_date:
+            time_display = f"{start_dt.strftime('%H:%M')} - {end_dt.strftime('%H:%M')}"
+        elif rec_start_date == today:
+            time_display = f"{start_dt.strftime('%H:%M')} - 18:00"
+        elif rec_end_date == today:
+            time_display = f"09:00 - {end_dt.strftime('%H:%M')}"
+        else:
+            time_display = "09:00 - 18:00"
+
+        # Build durationDisplay
+        if rec.duration_unit == "percent_hour":
+            hours = rec.duration_percent / 100.0
+            if hours == int(hours):
+                duration_display = f"{int(hours)}小时"
+            else:
+                duration_display = f"{hours}小时"
+        else:
+            days = rec.duration_percent / 100.0
+            if days == int(days):
+                duration_display = f"{int(days)}天"
+            else:
+                duration_display = f"{days}天"
+
+        result_records.append({
+            "userid": uid,
+            "name": emp.name,
+            "avatar": emp.avatar,
+            "deptName": emp.dept_name or "",
+            "leaveType": rec.leave_type or "请假",
+            "leaveCode": rec.leave_code,
+            "startTime": rec.start_time,
+            "endTime": rec.end_time,
+            "durationPercent": rec.duration_percent,
+            "durationUnit": rec.duration_unit,
+            "durationDisplay": duration_display,
+            "timeDisplay": time_display,
+            "status": rec.status or "已审批",
+        })
+
+    result_records.sort(key=lambda r: r["name"])
+
+    return {
+        "count": len(person_ids),
+        "records": result_records,
+    }
