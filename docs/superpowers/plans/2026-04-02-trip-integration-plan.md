@@ -20,8 +20,8 @@
 |------|---------------|
 | `backend/app/services/trip_sync.py` | Sync trip records from DingTalk with partitioned caching |
 | `backend/app/services/trip.py` | Query trip data (monthly summary, daily detail, today, stats) |
+| `backend/app/services/dept_utils.py` | Shared department utility (extract `_get_descendant_dept_ids`) |
 | `backend/app/routers/trip.py` | REST API endpoints for trip data |
-| `backend/tests/test_trip_models.py` | Model and schema unit tests |
 
 ### Backend — Modify
 
@@ -32,6 +32,7 @@
 | `backend/app/config.py` | Add `TRIP_SYNC_*` settings |
 | `backend/app/dingtalk/attendance.py` | Add `get_update_data()` wrapper |
 | `backend/app/services/export.py` | Add `export_trip_excel()` function |
+| `backend/app/services/leave.py` | Replace local `_get_descendant_dept_ids` with import from `dept_utils` |
 | `backend/app/main.py` | Register trip router + trip sync scheduler |
 
 ### Frontend — Create
@@ -63,7 +64,15 @@
 
 - [ ] **Step 1: Add TripRecord model**
 
-Add after the `LeaveRecord` class in `backend/app/models.py`:
+First, update the import line at the top of `backend/app/models.py`. Find the existing SQLAlchemy import and add `Float` and `Index`:
+
+```python
+from sqlalchemy import (
+    Column, DateTime, Float, Index, Integer, String, Text, UniqueConstraint,
+)
+```
+
+Then add after the `LeaveRecord` class:
 
 ```python
 class TripRecord(Base):
@@ -168,7 +177,13 @@ git commit -m "feat: add trip sync configuration settings"
 
 - [ ] **Step 1: Add trip response schemas**
 
-Add at the end of `backend/app/schemas.py`:
+First, update the `typing` import at the top of `backend/app/schemas.py` to include `Dict`:
+
+```python
+from typing import Dict, List, Optional
+```
+
+Then add at the end of the file:
 
 ```python
 # ---------------------------------------------------------------------------
@@ -244,9 +259,21 @@ class TripExportRequest(BaseModel):
 
 class TripSyncRequest(BaseModel):
     month: Optional[str] = Field(default=None, description="YYYY-MM format, optional")
+
+
+# Alias for router response_model consistency
+TripStatsResponse = TripStats
 ```
 
-Note: Ensure `Dict` is imported from `typing` at the top of schemas.py. Check if `PaginationInfo` is already defined (it is, used by leave monthly summary).
+Note: Check that `PaginationInfo` already has a `totalPages` field. If not, add it:
+
+```python
+class PaginationInfo(BaseModel):
+    page: int
+    pageSize: int
+    total: int
+    totalPages: int = 0  # Add this field if missing
+```
 
 - [ ] **Step 2: Commit**
 
@@ -585,31 +612,38 @@ async def sync_trip_records(force_month: Optional[str] = None) -> str:
                         continue
                 tasks.append((uid, work_date_str))
 
-            # Execute in batches with concurrency control
-            for uid, wds in tasks:
+            # Execute with actual concurrency via asyncio.gather
+            # Process in batches to allow failure threshold checking
+            batch_size = settings.trip_sync_concurrency * 5  # ~50 concurrent tasks per batch
+            for batch_start in range(0, len(tasks), batch_size):
                 if consecutive_failures >= settings.trip_sync_fail_threshold:
                     msg = f"Aborted: {consecutive_failures} consecutive failures"
                     await _finish_sync_log(log_id, "failed", msg)
                     return msg
 
-                retry_count = 0
-                while retry_count <= settings.trip_sync_retry_count:
-                    try:
-                        count = await _sync_one(uid, wds, semaphore)
-                        total_records += count
-                        consecutive_failures = 0
-                        break
-                    except Exception as e:
-                        retry_count += 1
-                        if retry_count > settings.trip_sync_retry_count:
-                            consecutive_failures += 1
-                            logger.warning(
-                                "Failed to sync trip for %s on %s after %d retries: %s",
-                                uid, wds, settings.trip_sync_retry_count, e,
-                            )
-                            break
-                        # Exponential backoff: 1s, 2s, 4s
-                        await asyncio.sleep(2 ** (retry_count - 1))
+                batch = tasks[batch_start: batch_start + batch_size]
+
+                async def _sync_with_retry(uid, wds):
+                    nonlocal total_records, consecutive_failures
+                    for attempt in range(settings.trip_sync_retry_count + 1):
+                        try:
+                            count = await _sync_one(uid, wds, semaphore)
+                            total_records += count
+                            consecutive_failures = 0
+                            return
+                        except Exception as e:
+                            if attempt >= settings.trip_sync_retry_count:
+                                consecutive_failures += 1
+                                logger.warning(
+                                    "Failed to sync trip for %s on %s after %d retries: %s",
+                                    uid, wds, settings.trip_sync_retry_count, e,
+                                )
+                                return
+                            await asyncio.sleep(2 ** attempt)  # 1s, 2s, 4s
+
+                await asyncio.gather(
+                    *[_sync_with_retry(uid, wds) for uid, wds in batch]
+                )
 
         # Cleanup old cursors (> 1 year)
         cutoff = datetime.now(timezone.utc) - timedelta(days=365)
@@ -652,12 +686,55 @@ git commit -m "feat: add trip sync service with partitioned caching"
 
 ---
 
-## Task 6: Trip Query Service
+## Task 6: Shared Dept Utility + Trip Query Service
 
 **Files:**
+- Create: `backend/app/services/dept_utils.py`
 - Create: `backend/app/services/trip.py`
+- Modify: `backend/app/services/leave.py`
 
-- [ ] **Step 1: Create trip.py query service**
+- [ ] **Step 1: Extract shared dept utility**
+
+Create `backend/app/services/dept_utils.py`:
+
+```python
+"""Shared department utilities used by leave and trip services."""
+
+from typing import Set
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models import Department
+
+
+async def get_descendant_dept_ids(session: AsyncSession, dept_id: int) -> Set[int]:
+    """Get all descendant department IDs including the given one."""
+    result = {dept_id}
+    queue = [dept_id]
+    while queue:
+        parent = queue.pop()
+        rows = await session.execute(
+            select(Department.dept_id).where(Department.parent_id == parent)
+        )
+        for (child_id,) in rows:
+            if child_id not in result:
+                result.add(child_id)
+                queue.append(child_id)
+    return result
+```
+
+- [ ] **Step 2: Update leave.py to use shared utility**
+
+In `backend/app/services/leave.py`, replace the local `_get_descendant_dept_ids` function with an import:
+
+```python
+from app.services.dept_utils import get_descendant_dept_ids
+```
+
+Then find-and-replace all calls from `_get_descendant_dept_ids(` to `get_descendant_dept_ids(` in the file.
+
+- [ ] **Step 3: Create trip.py query service**
 
 Create `backend/app/services/trip.py`:
 
@@ -678,24 +755,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import async_session
 from app.models import Department, Employee, TripRecord
+from app.services.dept_utils import get_descendant_dept_ids
 
 logger = logging.getLogger(__name__)
-
-
-async def _get_descendant_dept_ids(session: AsyncSession, dept_id: int) -> Set[int]:
-    """Get all descendant department IDs including the given one."""
-    result = {dept_id}
-    queue = [dept_id]
-    while queue:
-        parent = queue.pop()
-        rows = await session.execute(
-            select(Department.dept_id).where(Department.parent_id == parent)
-        )
-        for (child_id,) in rows:
-            if child_id not in result:
-                result.add(child_id)
-                queue.append(child_id)
-    return result
 
 
 async def get_trip_monthly_summary(
@@ -713,7 +775,7 @@ async def get_trip_monthly_summary(
         # Build employee filter
         emp_query = select(Employee)
         if dept_id:
-            dept_ids = await _get_descendant_dept_ids(session, dept_id)
+            dept_ids = await get_descendant_dept_ids(session, dept_id)
             emp_query = emp_query.where(Employee.dept_id.in_(dept_ids))
         if employee_name:
             emp_query = emp_query.where(Employee.name.contains(employee_name))
@@ -919,7 +981,7 @@ async def get_trip_today(
         )
 
         if dept_id:
-            dept_ids = await _get_descendant_dept_ids(session, dept_id)
+            dept_ids = await get_descendant_dept_ids(session, dept_id)
             query = query.where(Employee.dept_id.in_(dept_ids))
         if trip_type:
             query = query.where(TripRecord.tag_name == trip_type)
@@ -974,7 +1036,7 @@ async def get_trip_daily_count(
         )
 
         if dept_id:
-            dept_ids = await _get_descendant_dept_ids(session, dept_id)
+            dept_ids = await get_descendant_dept_ids(session, dept_id)
             query = query.where(Employee.dept_id.in_(dept_ids))
         if trip_type:
             query = query.where(TripRecord.tag_name == trip_type)
@@ -989,17 +1051,17 @@ async def get_trip_daily_count(
         }
 ```
 
-- [ ] **Step 2: Verify imports**
+- [ ] **Step 4: Verify imports**
 
 ```bash
 cd backend && python -c "from app.services.trip import get_trip_monthly_summary; print('Import OK')"
 ```
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add backend/app/services/trip.py
-git commit -m "feat: add trip query service (monthly, daily, today, stats)"
+git add backend/app/services/dept_utils.py backend/app/services/trip.py backend/app/services/leave.py
+git commit -m "refactor: extract dept_utils; add trip query service"
 ```
 
 ---
@@ -1087,13 +1149,14 @@ async def export_trip_excel(
         cell.border = THIN_BORDER
 
     # Column widths
+    from openpyxl.utils import get_column_letter
     ws.column_dimensions["A"].width = 12
     ws.column_dimensions["B"].width = 14
     ws.column_dimensions["C"].width = 10
     ws.column_dimensions["D"].width = 10
     for i in range(5, 17):
-        ws.column_dimensions[chr(64 + i)].width = 8
-    ws.column_dimensions["Q"].width = 10
+        ws.column_dimensions[get_column_letter(i)].width = 8
+    ws.column_dimensions[get_column_letter(17)].width = 10
 
     output = io.BytesIO()
     wb.save(output)
@@ -1198,7 +1261,7 @@ async def today_list(
     employeeName: Optional[str] = Query(default=None),
     _user=Depends(get_current_user),
 ):
-    return await get_trip_today(deptId, tripType, employeeName)
+    return await get_trip_today(dept_id=deptId, trip_type=tripType, employee_name=employeeName)
 
 
 @router.get("/stats", response_model=TripStatsResponse)
@@ -1282,26 +1345,50 @@ Add after the last `app.include_router(...)` line:
 app.include_router(trip.router)
 ```
 
-- [ ] **Step 3: Add trip sync scheduler in main.py lifespan**
+- [ ] **Step 3: Add trip sync scheduler in main.py**
 
-In the `lifespan` function, add trip sync scheduling after the existing scheduler setup (look for existing APScheduler code):
+Add a new `_setup_trip_scheduler()` function after the existing `_setup_scheduler()` function in `backend/app/main.py`:
 
 ```python
-    # Trip sync scheduler
-    if settings.trip_sync_enabled and settings.trip_sync_cron:
-        from app.services.trip_sync import sync_trip_records
-        parts = settings.trip_sync_cron.split()
-        if len(parts) == 5:
-            scheduler.add_job(
-                lambda: asyncio.ensure_future(sync_trip_records()),
-                "cron",
-                minute=parts[0], hour=parts[1],
-                day=parts[2], month=parts[3],
-                day_of_week=parts[4],
-                id="trip_sync",
-                replace_existing=True,
-            )
-            logger.info("Trip sync scheduled: %s", settings.trip_sync_cron)
+def _setup_trip_scheduler():
+    """Set up APScheduler for trip sync if enabled."""
+    global _scheduler
+    if not settings.trip_sync_enabled:
+        logger.info("Trip sync disabled")
+        return
+    cron_expr = settings.trip_sync_cron.strip()
+    if not cron_expr:
+        return
+
+    try:
+        from apscheduler.schedulers.asyncio import AsyncIOScheduler
+        from apscheduler.triggers.cron import CronTrigger
+
+        if _scheduler is None:
+            _scheduler = AsyncIOScheduler()
+
+        trigger = CronTrigger.from_crontab(cron_expr)
+
+        async def scheduled_trip_sync():
+            logger.info("Scheduled trip sync triggered by cron: %s", cron_expr)
+            try:
+                from app.services.trip_sync import sync_trip_records
+                await sync_trip_records()
+            except Exception as e:
+                logger.exception("Scheduled trip sync failed: %s", e)
+
+        _scheduler.add_job(scheduled_trip_sync, trigger, id="trip_sync", replace_existing=True)
+        if not _scheduler.running:
+            _scheduler.start()
+        logger.info("Trip sync scheduled: %s", cron_expr)
+    except Exception as e:
+        logger.exception("Failed to setup trip scheduler: %s", e)
+```
+
+Then in the `lifespan` function, add after `_setup_scheduler()`:
+
+```python
+    _setup_trip_scheduler()
 ```
 
 - [ ] **Step 4: Verify server starts**
@@ -1412,7 +1499,6 @@ Create `frontend/src/composables/useTripData.js`:
 ```javascript
 import { ref, reactive, computed } from 'vue'
 import api from '../api/index.js'
-import { saveAs } from 'file-saver'
 
 export function useTripData() {
   // Filters
@@ -1636,6 +1722,7 @@ export function useTripData() {
         tripType: filters.tripType || undefined,
         employeeName: filters.employeeName || undefined,
       })
+      const { saveAs } = await import('file-saver')
       saveAs(blob, `外出出差统计_${filters.year}.xlsx`)
     } catch (e) {
       console.error('Failed to export trip excel', e)
@@ -1968,7 +2055,7 @@ In the desktop `<nav>` section of `AppHeader.vue`, add a new button after the "�
         class="px-3 py-1.5 text-[13px] rounded-md transition-colors"
         :class="activePage === 'trip'
           ? 'bg-highlight text-accent font-semibold'
-          : 'text-text-secondary hover:text-text-primary hover:bg-surface-secondary'"
+          : 'text-text-secondary font-medium hover:text-text-primary'"
         @click="emit('page-change', 'trip')"
       >
         外出/出差
