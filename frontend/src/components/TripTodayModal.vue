@@ -27,6 +27,11 @@ const props = defineProps({
 
 const emit = defineEmits(['close'])
 
+/** Unique person count (deduplicated by employeeId) */
+const uniqueCount = computed(() => {
+  return new Set(props.detail.map(d => d.employeeId)).size
+})
+
 /**
  * Dynamic title based on tripType
  */
@@ -79,7 +84,7 @@ function onOverlayClick(event) {
                 <div>
                   <div class="text-base font-semibold text-text-primary">{{ title }}</div>
                   <div class="text-[13px] text-text-secondary mt-0.5">
-                    共 <span class="font-medium text-text-primary">{{ detail.length }}</span> 人
+                    共 <span class="font-medium text-text-primary">{{ uniqueCount }}</span> 人
                   </div>
                 </div>
               </div>
@@ -169,7 +174,7 @@ function onOverlayClick(event) {
               <div class="flex items-center justify-between">
                 <span class="text-[13px] font-medium text-text-secondary">{{ title }}</span>
                 <span class="text-sm font-semibold text-text-primary">
-                  共 {{ detail.length }} 人
+                  共 {{ uniqueCount }} 人
                 </span>
               </div>
             </div>
