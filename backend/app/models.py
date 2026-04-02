@@ -5,12 +5,7 @@ SQLAlchemy ORM models for all database tables.
 from datetime import datetime
 
 from sqlalchemy import (
-    Column,
-    Integer,
-    String,
-    Text,
-    DateTime,
-    UniqueConstraint,
+    Column, DateTime, Float, Index, Integer, String, Text, UniqueConstraint,
 )
 
 from app.database import Base
@@ -69,6 +64,37 @@ class LeaveRecord(Base):
     __table_args__ = (
         UniqueConstraint("userid", "start_time", "end_time", name="uq_leave_record"),
     )
+
+
+class TripRecord(Base):
+    """Business trip / out-of-office records from getupdatedata API."""
+    __tablename__ = "trip_record"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    userid = Column(String, nullable=False, comment="DingTalk user ID")
+    work_date = Column(String, nullable=False, comment="Work date YYYY-MM-DD")
+    tag_name = Column(String, nullable=False, comment="出差 or 外出")
+    sub_type = Column(String, nullable=True, comment="Sub-type name")
+    begin_time = Column(String, nullable=False, comment="Approval begin time")
+    end_time = Column(String, nullable=False, comment="Approval end time")
+    duration_hours = Column(Float, nullable=False, default=0, comment="Hours for this work_date (8=full day)")
+    proc_inst_id = Column(String, nullable=False, comment="Approval instance ID")
+    last_synced_at = Column(DateTime, nullable=False, comment="Last sync timestamp")
+    created_at = Column(DateTime, default=datetime.utcnow, comment="Record creation time")
+
+    __table_args__ = (
+        UniqueConstraint("userid", "work_date", "proc_inst_id", name="uq_trip_record"),
+        Index("ix_trip_work_date_tag", "work_date", "tag_name"),
+    )
+
+
+class TripSyncCursor(Base):
+    """Tracks which (userid, work_date) pairs have been synced."""
+    __tablename__ = "trip_sync_cursor"
+
+    userid = Column(String, primary_key=True, comment="DingTalk user ID")
+    work_date = Column(String, primary_key=True, comment="Date YYYY-MM-DD")
+    last_synced_at = Column(DateTime, nullable=False, comment="Last sync timestamp")
 
 
 class LeaveType(Base):
