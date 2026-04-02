@@ -748,18 +748,23 @@ async def get_today_leave_detail(
         else:
             time_display = "09:00 - 18:00"
 
-        # Build durationDisplay — derive from today's effective time range
-        # so it always matches timeDisplay
+        # Build durationDisplay
         if rec_start_date == rec_end_date:
-            # Same-day: use actual start/end from record
-            eff_start_h = start_dt.hour + start_dt.minute / 60.0
-            eff_end_h = end_dt.hour + end_dt.minute / 60.0
+            # Same-day: use DingTalk's original duration (already accounts for lunch)
+            hpd = 800
+            if rec.leave_code and rec.leave_code in type_map:
+                hpd = type_map[rec.leave_code].hours_in_per_day or 800
+            today_hours = _convert_duration(rec.duration_percent, rec.duration_unit, "hour", hpd)
         else:
-            # Cross-day: use same logic as timeDisplay
+            # Cross-day: calculate from effective today time range, deduct lunch overlap
             eff_start_h = start_dt.hour + start_dt.minute / 60.0 if rec_start_date == today else 9.0
             eff_end_h = end_dt.hour + end_dt.minute / 60.0 if rec_end_date == today else 18.0
+            raw_hours = eff_end_h - eff_start_h
+            # Deduct overlap with 12:00-13:00 lunch break
+            lunch_deduct = max(0.0, min(eff_end_h, 13.0) - max(eff_start_h, 12.0))
+            today_hours = raw_hours - lunch_deduct
 
-        today_hours = round(eff_end_h - eff_start_h, 1)
+        today_hours = round(today_hours, 1)
         if today_hours == int(today_hours):
             duration_display = f"{int(today_hours)}小时"
         else:
