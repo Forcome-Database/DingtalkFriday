@@ -748,18 +748,18 @@ async def get_today_leave_detail(
         else:
             time_display = "09:00 - 18:00"
 
-        # Build durationDisplay — prorate to today for cross-day records
+        # Build durationDisplay — derive from today's effective time range
+        # so it always matches timeDisplay
         if rec_start_date == rec_end_date:
-            # Same-day record: use original duration
-            today_hours = _convert_duration(
-                rec.duration_percent, rec.duration_unit, "hour",
-                (type_map[rec.leave_code].hours_in_per_day or 800) if rec.leave_code and rec.leave_code in type_map else 800,
-            )
+            # Same-day: use actual start/end from record
+            eff_start_h = start_dt.hour + start_dt.minute / 60.0
+            eff_end_h = end_dt.hour + end_dt.minute / 60.0
         else:
-            # Cross-day record: prorate to today only
-            today_hours = _prorate_duration(rec, today, today, type_map, "hour")
+            # Cross-day: use same logic as timeDisplay
+            eff_start_h = start_dt.hour + start_dt.minute / 60.0 if rec_start_date == today else 9.0
+            eff_end_h = end_dt.hour + end_dt.minute / 60.0 if rec_end_date == today else 18.0
 
-        today_hours = round(today_hours, 1)
+        today_hours = round(eff_end_h - eff_start_h, 1)
         if today_hours == int(today_hours):
             duration_display = f"{int(today_hours)}小时"
         else:
