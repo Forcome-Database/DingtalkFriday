@@ -22,7 +22,7 @@ const emit = defineEmits(['sync', 'export', 'trip-sync', 'trip-export', 'page-ch
   >
     <div class="flex items-center gap-3">
       <CalendarDays class="text-accent" :size="28" :stroke-width="1.8" />
-      <span class="text-lg font-semibold text-text-primary">员工请假管理系统</span>
+      <span class="text-lg font-semibold text-text-primary">员工考勤系统</span>
 
       <nav class="flex items-center gap-1 ml-4">
         <button
@@ -32,7 +32,7 @@ const emit = defineEmits(['sync', 'export', 'trip-sync', 'trip-export', 'page-ch
             : 'text-text-secondary font-medium hover:text-text-primary'"
           @click="emit('page-change', 'export')"
         >
-          数据导出
+          请假数据
         </button>
         <button
           class="px-3 py-1.5 text-[13px] rounded-md transition-colors"
@@ -184,7 +184,7 @@ const emit = defineEmits(['sync', 'export', 'trip-sync', 'trip-export', 'page-ch
       @click="emit('page-change', 'export')"
     >
       <FileSpreadsheet :size="20" :stroke-width="activePage === 'export' ? 2.2 : 1.6" />
-      <span class="text-[10px] font-medium">数据导出</span>
+      <span class="text-[10px] font-medium">请假数据</span>
     </button>
     <button
       class="flex-1 flex flex-col items-center justify-center gap-0.5 py-2 transition-colors"

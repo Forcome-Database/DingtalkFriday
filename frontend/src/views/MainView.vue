@@ -223,8 +223,8 @@ onMounted(async () => {
       <!-- Page title section -->
       <div class="flex items-center justify-between">
         <div>
-          <h1 class="text-2xl font-semibold text-text-primary">请假数据导出</h1>
-          <p class="text-sm text-text-secondary mt-1">按部门查询和导出员工请假数据</p>
+          <h1 class="text-2xl font-semibold text-text-primary">请假数据统计</h1>
+          <p class="text-sm text-text-secondary mt-1">按部门查询和导出员工请假统计数据</p>
         </div>
       </div>
 

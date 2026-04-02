@@ -693,7 +693,7 @@ git commit -m "feat: add trip sync service with partitioned caching"
 - Create: `backend/app/services/trip.py`
 - Modify: `backend/app/services/leave.py`
 
-- [ ] **Step 1: Extract shared dept utility**
+- [x] **Step 1: Extract shared dept utility**
 
 Create `backend/app/services/dept_utils.py`:
 
@@ -724,7 +724,7 @@ async def get_descendant_dept_ids(session: AsyncSession, dept_id: int) -> Set[in
     return result
 ```
 
-- [ ] **Step 2: Update leave.py to use shared utility**
+- [x] **Step 2: Update leave.py to use shared utility**
 
 In `backend/app/services/leave.py`, replace the local `_get_descendant_dept_ids` function with an import:
 
@@ -734,7 +734,7 @@ from app.services.dept_utils import get_descendant_dept_ids
 
 Then find-and-replace all calls from `_get_descendant_dept_ids(` to `get_descendant_dept_ids(` in the file.
 
-- [ ] **Step 3: Create trip.py query service**
+- [x] **Step 3: Create trip.py query service**
 
 Create `backend/app/services/trip.py`:
 
@@ -1051,13 +1051,13 @@ async def get_trip_daily_count(
         }
 ```
 
-- [ ] **Step 4: Verify imports**
+- [x] **Step 4: Verify imports**
 
 ```bash
 cd backend && python -c "from app.services.trip import get_trip_monthly_summary; print('Import OK')"
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/app/services/dept_utils.py backend/app/services/trip.py backend/app/services/leave.py
@@ -1071,7 +1071,7 @@ git commit -m "refactor: extract dept_utils; add trip query service"
 **Files:**
 - Modify: `backend/app/services/export.py`
 
-- [ ] **Step 1: Add export_trip_excel function**
+- [x] **Step 1: Add export_trip_excel function**
 
 Add at the end of `backend/app/services/export.py`:
 
@@ -1166,7 +1166,7 @@ async def export_trip_excel(
 
 Note: Ensure `Optional` and `List` are imported from `typing`. The style constants (`HEADER_FILL`, `HEADER_FONT`, `SUMMARY_FILL`, `CENTER_ALIGN`, `THIN_BORDER`) are already defined in this file.
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add backend/app/services/export.py
@@ -1181,7 +1181,7 @@ git commit -m "feat: add trip Excel export function"
 - Create: `backend/app/routers/trip.py`
 - Modify: `backend/app/main.py`
 
-- [ ] **Step 1: Create trip router**
+- [x] **Step 1: Create trip router**
 
 Create `backend/app/routers/trip.py`:
 
@@ -1331,7 +1331,7 @@ async def trigger_sync(
     return MessageResponse(message="Trip sync started", success=True)
 ```
 
-- [ ] **Step 2: Register router in main.py**
+- [x] **Step 2: Register router in main.py**
 
 Add to `backend/app/main.py` imports:
 
@@ -1345,7 +1345,7 @@ Add after the last `app.include_router(...)` line:
 app.include_router(trip.router)
 ```
 
-- [ ] **Step 3: Add trip sync scheduler in main.py**
+- [x] **Step 3: Add trip sync scheduler in main.py**
 
 Add a new `_setup_trip_scheduler()` function after the existing `_setup_scheduler()` function in `backend/app/main.py`:
 
@@ -1391,13 +1391,13 @@ Then in the `lifespan` function, add after `_setup_scheduler()`:
     _setup_trip_scheduler()
 ```
 
-- [ ] **Step 4: Verify server starts**
+- [x] **Step 4: Verify server starts**
 
 ```bash
 cd backend && python -c "from app.main import app; print('App loaded OK')"
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/app/routers/trip.py backend/app/main.py
@@ -1411,7 +1411,7 @@ git commit -m "feat: add trip API router and register in app"
 **Files:**
 - Modify: `frontend/src/api/index.js`
 
-- [ ] **Step 1: Add trip API methods**
+- [x] **Step 1: Add trip API methods**
 
 Add these methods to the default export object in `frontend/src/api/index.js`:
 
@@ -1478,7 +1478,7 @@ Add these methods to the default export object in `frontend/src/api/index.js`:
   },
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add frontend/src/api/index.js
@@ -1492,7 +1492,7 @@ git commit -m "feat: add trip API client methods"
 **Files:**
 - Create: `frontend/src/composables/useTripData.js`
 
-- [ ] **Step 1: Create useTripData composable**
+- [x] **Step 1: Create useTripData composable**
 
 Create `frontend/src/composables/useTripData.js`:
 
@@ -1746,7 +1746,7 @@ export function useTripData() {
 }
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add frontend/src/composables/useTripData.js
@@ -1761,7 +1761,7 @@ git commit -m "feat: add useTripData composable for trip state management"
 - Create: `frontend/src/components/TripStatsCards.vue`
 - Create: `frontend/src/components/TripFilterPanel.vue`
 
-- [ ] **Step 1: Create TripStatsCards.vue**
+- [x] **Step 1: Create TripStatsCards.vue**
 
 Create `frontend/src/components/TripStatsCards.vue` — follow the exact pattern from `StatsCards.vue` (4 cards, same spacing/sizing, same Tailwind classes):
 
@@ -1854,7 +1854,7 @@ const emit = defineEmits(['todayTripClick', 'todayOutingClick'])
 </template>
 ```
 
-- [ ] **Step 2: Create TripFilterPanel.vue**
+- [x] **Step 2: Create TripFilterPanel.vue**
 
 Create `frontend/src/components/TripFilterPanel.vue` — follow the exact pattern from `FilterPanel.vue` but replace leave type multi-select with a segmented control (全部/出差/外出):
 
@@ -1997,7 +1997,7 @@ function onNameChange(val) {
 </template>
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add frontend/src/components/TripStatsCards.vue frontend/src/components/TripFilterPanel.vue
@@ -2013,7 +2013,7 @@ git commit -m "feat: add TripStatsCards and TripFilterPanel components"
 - Create: `frontend/src/components/TripTodayModal.vue`
 - Create: `frontend/src/components/TripDailyStats.vue`
 
-- [ ] **Step 1: Create TripDataTable.vue**
+- [x] **Step 1: Create TripDataTable.vue**
 
 Create `frontend/src/components/TripDataTable.vue` following the exact pattern of `DataTable.vue` (same table styles, pagination, sort headers). Key differences: columns are 姓名, 部门, 出差(天), 外出(天), 1月~12月, 合计. Read `DataTable.vue` fully before writing to match style exactly.
 
@@ -2024,15 +2024,15 @@ The component should:
 - Reuse `Pagination.vue` component for pagination
 - Make employee name clickable (emits `cell-click` with employeeId, month)
 
-- [ ] **Step 2: Create TripTodayModal.vue**
+- [x] **Step 2: Create TripTodayModal.vue**
 
 Create `frontend/src/components/TripTodayModal.vue` following the pattern of `TodayLeaveModal.vue`. Key differences: show `tagName` (出差/外出) column instead of leave type, show `beginTime`~`endTime` range. Read `TodayLeaveModal.vue` fully before writing to match style exactly.
 
-- [ ] **Step 3: Create TripDailyStats.vue**
+- [x] **Step 3: Create TripDailyStats.vue**
 
 Create `frontend/src/components/TripDailyStats.vue` following the pattern of `DailyLeaveStats.vue`. Same heatmap grid + detail list layout. Read `DailyLeaveStats.vue` fully before writing. Uses `dailyTripData.days` for heatmap colors.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add frontend/src/components/TripDataTable.vue frontend/src/components/TripTodayModal.vue frontend/src/components/TripDailyStats.vue
@@ -2046,7 +2046,7 @@ git commit -m "feat: add TripDataTable, TripTodayModal, TripDailyStats component
 **Files:**
 - Modify: `frontend/src/components/AppHeader.vue`
 
-- [ ] **Step 1: Add trip nav tab to desktop navigation**
+- [x] **Step 1: Add trip nav tab to desktop navigation**
 
 In the desktop `<nav>` section of `AppHeader.vue`, add a new button after the "数据导出" button and before the "数据分析" button:
 
@@ -2062,7 +2062,7 @@ In the desktop `<nav>` section of `AppHeader.vue`, add a new button after the "�
       </button>
 ```
 
-- [ ] **Step 2: Add trip nav tab to mobile bottom bar**
+- [x] **Step 2: Add trip nav tab to mobile bottom bar**
 
 In the mobile bottom tab bar section, add a new tab between "数据导出" and "数据分析". Import `Briefcase` from lucide-vue-next. Use the same pattern as existing tabs:
 
@@ -2077,7 +2077,7 @@ In the mobile bottom tab bar section, add a new tab between "数据导出" and "
       </button>
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add frontend/src/components/AppHeader.vue
@@ -2091,7 +2091,7 @@ git commit -m "feat: add trip tab to desktop and mobile navigation"
 **Files:**
 - Modify: `frontend/src/views/MainView.vue`
 
-- [ ] **Step 1: Import trip components and composable**
+- [x] **Step 1: Import trip components and composable**
 
 Add imports at the top of `MainView.vue`:
 
@@ -2104,7 +2104,7 @@ import TripDailyStats from '../components/TripDailyStats.vue'
 import TripTodayModal from '../components/TripTodayModal.vue'
 ```
 
-- [ ] **Step 2: Destructure useTripData**
+- [x] **Step 2: Destructure useTripData**
 
 After the existing `useLeaveData()` destructure block, add:
 
@@ -2144,7 +2144,7 @@ const {
 } = useTripData()
 ```
 
-- [ ] **Step 3: Add trip tab state**
+- [x] **Step 3: Add trip tab state**
 
 Add after the existing `activeTab` ref:
 
@@ -2152,7 +2152,7 @@ Add after the existing `activeTab` ref:
 const activeTripTab = ref('table')
 ```
 
-- [ ] **Step 4: Initialize trip data on mount**
+- [x] **Step 4: Initialize trip data on mount**
 
 In the existing `onMounted` callback, add:
 
@@ -2162,7 +2162,7 @@ In the existing `onMounted` callback, add:
   fetchDailyTripCount()
 ```
 
-- [ ] **Step 5: Add trip page template section**
+- [x] **Step 5: Add trip page template section**
 
 In the template, after the existing export page section (`v-if="activePage === 'export'"`) and before the analytics section, add the trip page:
 
@@ -2242,7 +2242,7 @@ In the template, after the existing export page section (`v-if="activePage === '
     </div>
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add frontend/src/views/MainView.vue
@@ -2257,7 +2257,7 @@ git commit -m "feat: integrate trip page into MainView with full data flow"
 - Modify: `frontend/src/components/StatsCards.vue`
 - Modify: `frontend/src/views/MainView.vue`
 
-- [ ] **Step 1: Add todayTripCount prop and 6th card to StatsCards**
+- [x] **Step 1: Add todayTripCount prop and 6th card to StatsCards**
 
 In `StatsCards.vue`, add a new prop:
 
@@ -2301,7 +2301,7 @@ Add a 6th card at the end of the grid:
 
 Import `Briefcase` from lucide-vue-next.
 
-- [ ] **Step 2: Wire up in MainView**
+- [x] **Step 2: Wire up in MainView**
 
 In `MainView.vue`, where `<StatsCards>` is used, add the new props and event:
 
@@ -2316,7 +2316,7 @@ In `MainView.vue`, where `<StatsCards>` is used, add the new props and event:
       />
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add frontend/src/components/StatsCards.vue frontend/src/views/MainView.vue
