@@ -179,3 +179,25 @@ async def get_vacation_type_list(op_userid: str) -> List[Dict[str, Any]]:
         })
     logger.info("Fetched %d vacation types", len(types))
     return types
+
+
+async def get_update_data(userid: str, work_date: str) -> Dict[str, Any]:
+    """
+    Query a user's attendance data for a specific date.
+
+    POST /topapi/attendance/getupdatedata
+    Body: { userid, work_date }
+
+    Returns the full response dict containing:
+    - approve_list: list of approval records with biz_type, tag_name, etc.
+    - check_record_list: clock-in records
+    - attendance_result_list: attendance results
+    """
+    data = await dingtalk_client.post(
+        "/topapi/attendance/getupdatedata",
+        json_body={
+            "userid": userid,
+            "work_date": work_date,
+        },
+    )
+    return data.get("result", {})
