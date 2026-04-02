@@ -53,10 +53,13 @@
 
 **设计要点**：
 
-- `durationDisplay` 和 `timeDisplay` 由后端计算，避免前端处理时区和单位换算
+- `count` 为去重后的请假人数（`DISTINCT userid`），与 `daily-leave-count` 的 `todayCount` 保持一致。`records` 列表可能多于 `count`（同一人多条记录）
+- `durationDisplay` 和 `timeDisplay` 由后端计算，避免前端处理时区和单位换算。时区统一使用 `Asia/Shanghai`
 - 同一人可能有多条记录（如上午事假 + 下午年假），每条独立返回
-- 查询逻辑：`start_time < 今日结束` AND `end_time > 今日开始`（overlap 判断）
+- 查询逻辑：`start_time < 今日 23:59:59` AND `end_time > 今日 00:00:00`（overlap 判断），与 `get_daily_leave_count` 共享查询构建逻辑，确保数据一致性
 - JOIN Employee 表获取 name、avatar、dept_name
+- **跨天记录处理**：若请假跨越多天（如3天年假），`timeDisplay` 按实际时间戳显示（如 "04-01 09:00 - 04-03 18:00"），`durationDisplay` 显示总时长
+- `deptId` 参数接收前端传递的有效部门 ID（`filters.deptId2 || filters.deptId`）
 
 ## 前端组件
 
@@ -94,9 +97,9 @@
 **列表项样式**：
 
 - 每项 `rounded-xl border-[1.5px] border-border-default` 卡片
-- 头像 32px 圆形，姓名 `text-text-primary font-medium`
+- 头像 32px 圆形（avatar 为空时使用姓名首字符 fallback，复用现有 `getInitial()` 逻辑），姓名 `text-text-primary font-medium`
 - 部门 `text-text-tertiary text-[13px]`
-- 假期类型颜色编码（年假蓝、事假黄、病假红、调休绿，复用 tailwind.config.js 中定义的颜色）
+- 假期类型颜色编码：复用现有 `useLeaveData.js` 中的 `colorPool` 动态颜色映射机制（支持年假蓝、事假黄、病假红、调休绿及更多动态颜色），不硬编码
 - 时间段 `text-text-primary`，时长 `text-text-secondary`
 - 审批状态：已审批=绿色、审批中=橙色、已驳回=红色
 
@@ -135,6 +138,10 @@
 
 筛选参数透传当前 FilterPanel 选中状态，确保弹窗数据与卡片数字一致。
 
+**一致性约束**：`today-detail` 的 overlap 查询逻辑和部门递归/假期类型过滤必须与 `daily-leave-count` 中计算 `todayCount` 的逻辑完全一致，确保卡片数字与弹窗人数匹配。
+
+**防重复请求**：前端使用 loading 标记防止重复点击触发多次请求。
+
 ## 文件变更清单
 
 | 文件 | 变更类型 | 说明 |
@@ -146,6 +153,7 @@
 | `frontend/src/components/TodayLeaveModal.vue` | 新建 | 右侧滑出面板组件 |
 | `frontend/src/components/StatsCards.vue` | 修改 | 卡片加 click + hover |
 | `frontend/src/views/MainView.vue` | 修改 | 引入 Modal，管理状态 |
+| `frontend/src/composables/useLeaveData.js` | 修改 | 新增 todayLeaveDetail 状态和 fetchTodayLeaveDetail() 方法 |
 
 ## 不变更
 
