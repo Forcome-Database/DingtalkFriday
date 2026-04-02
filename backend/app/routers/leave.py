@@ -21,8 +21,9 @@ from app.schemas import (
     DailyLeaveCountResponse,
     LeaveTypeOut,
     MonthlySummaryResponse,
+    TodayLeaveDetailResponse,
 )
-from app.services.leave import get_daily_detail, get_daily_leave_count, get_monthly_summary
+from app.services.leave import get_daily_detail, get_daily_leave_count, get_monthly_summary, get_today_leave_detail
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/leave", tags=["leave"])
@@ -110,6 +111,33 @@ async def daily_leave_count(
     result = await get_daily_leave_count(
         year=year,
         month=month,
+        dept_id=deptId,
+        leave_types=leave_type_list,
+        employee_name=employeeName,
+    )
+    return result
+
+
+@router.get("/today-detail", response_model=TodayLeaveDetailResponse)
+async def today_detail(
+    deptId: Optional[int] = Query(default=None, description="Department ID filter"),
+    leaveTypes: Optional[str] = Query(
+        default=None,
+        description="Comma-separated leave type names",
+    ),
+    employeeName: Optional[str] = Query(
+        default=None, description="Employee name keyword"
+    ),
+    _user=Depends(get_current_user),
+):
+    """
+    Get detailed leave records for today with employee info.
+    """
+    leave_type_list: Optional[List[str]] = None
+    if leaveTypes:
+        leave_type_list = [t.strip() for t in leaveTypes.split(",") if t.strip()]
+
+    result = await get_today_leave_detail(
         dept_id=deptId,
         leave_types=leave_type_list,
         employee_name=employeeName,
