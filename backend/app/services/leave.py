@@ -748,19 +748,22 @@ async def get_today_leave_detail(
         else:
             time_display = "09:00 - 18:00"
 
-        # Build durationDisplay
-        if rec.duration_unit == "percent_hour":
-            hours = rec.duration_percent / 100.0
-            if hours == int(hours):
-                duration_display = f"{int(hours)}小时"
-            else:
-                duration_display = f"{hours}小时"
+        # Build durationDisplay — prorate to today for cross-day records
+        if rec_start_date == rec_end_date:
+            # Same-day record: use original duration
+            today_hours = _convert_duration(
+                rec.duration_percent, rec.duration_unit, "hour",
+                (type_map[rec.leave_code].hours_in_per_day or 800) if rec.leave_code and rec.leave_code in type_map else 800,
+            )
         else:
-            days = rec.duration_percent / 100.0
-            if days == int(days):
-                duration_display = f"{int(days)}天"
-            else:
-                duration_display = f"{days}天"
+            # Cross-day record: prorate to today only
+            today_hours = _prorate_duration(rec, today, today, type_map, "hour")
+
+        today_hours = round(today_hours, 1)
+        if today_hours == int(today_hours):
+            duration_display = f"{int(today_hours)}小时"
+        else:
+            duration_display = f"{today_hours}小时"
 
         result_records.append({
             "userid": uid,
