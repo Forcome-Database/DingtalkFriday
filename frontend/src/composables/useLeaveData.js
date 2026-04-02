@@ -247,6 +247,11 @@ export function useLeaveData() {
   const dailyLeaveLoading = ref(false)
   const todayLeaveCount = ref(0)
 
+  // --- Today leave detail modal state ---
+  const todayLeaveVisible = ref(false)
+  const todayLeaveDetail = ref(null)
+  const todayLeaveLoading = ref(false)
+
   // --- Sync state ---
   const syncing = ref(false)
   const syncMessage = ref('')
@@ -497,6 +502,51 @@ export function useLeaveData() {
   }
 
   /**
+   * Fetch today's leave detail for the modal
+   */
+  async function fetchTodayLeaveDetail() {
+    if (todayLeaveLoading.value) return
+    todayLeaveLoading.value = true
+    todayLeaveVisible.value = true
+
+    try {
+      const effectiveDeptId = filters.deptId2 || filters.deptId
+      const params = {
+        deptId: effectiveDeptId,
+        leaveTypes: filters.leaveTypes,
+        employeeName: filters.employeeName
+      }
+
+      if (USE_MOCK) {
+        await new Promise(resolve => setTimeout(resolve, 300))
+        todayLeaveDetail.value = {
+          count: 3,
+          records: [
+            { userid: 'U001', name: '张三', avatar: '', deptName: '研发部', leaveType: '年假', leaveCode: 'annual', startTime: 0, endTime: 0, durationPercent: 800, durationUnit: 'percent_hour', durationDisplay: '8小时', timeDisplay: '09:00 - 18:00', status: '已审批' },
+            { userid: 'U002', name: '李四', avatar: '', deptName: '产品部', leaveType: '事假', leaveCode: 'personal', startTime: 0, endTime: 0, durationPercent: 400, durationUnit: 'percent_hour', durationDisplay: '4小时', timeDisplay: '14:00 - 18:00', status: '已审批' },
+            { userid: 'U003', name: '王五', avatar: '', deptName: '设计部', leaveType: '病假', leaveCode: 'sick', startTime: 0, endTime: 0, durationPercent: 800, durationUnit: 'percent_hour', durationDisplay: '8小时', timeDisplay: '09:00 - 18:00', status: '审批中' }
+          ]
+        }
+      } else {
+        todayLeaveDetail.value = await api.getTodayLeaveDetail(params)
+      }
+    } catch (e) {
+      console.error('Failed to fetch today leave detail:', e)
+      todayLeaveDetail.value = null
+    } finally {
+      todayLeaveLoading.value = false
+    }
+  }
+
+  /**
+   * Close the today leave detail modal
+   */
+  function closeTodayLeave() {
+    todayLeaveVisible.value = false
+    todayLeaveDetail.value = null
+  }
+
+  /**
    * Fetch daily detail for the calendar modal
    */
   async function fetchDailyDetail(employeeId, name, dept, year, month) {
@@ -699,6 +749,9 @@ export function useLeaveData() {
     dailyLeaveData,
     dailyLeaveLoading,
     todayLeaveCount,
+    todayLeaveVisible,
+    todayLeaveDetail,
+    todayLeaveLoading,
     syncing,
     syncMessage,
     yearOptions,
@@ -719,6 +772,8 @@ export function useLeaveData() {
     toggleSort,
     setUnit,
     triggerSync,
-    exportExcel
+    exportExcel,
+    fetchTodayLeaveDetail,
+    closeTodayLeave
   }
 }
