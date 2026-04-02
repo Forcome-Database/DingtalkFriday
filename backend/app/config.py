@@ -47,6 +47,16 @@ class Settings(BaseSettings):
     # Dev mode: enable phone-based login bypass (NEVER enable in production)
     dev_mode: bool = False
 
+    # Trip (business trip / out-of-office) sync settings
+    trip_sync_enabled: bool = True
+    trip_sync_cron: str = "30 2 * * *"
+    trip_hot_days_past: int = 3
+    trip_hot_days_future: int = 7
+    trip_warm_days_future: int = 90
+    trip_sync_concurrency: int = 10
+    trip_sync_retry_count: int = 3
+    trip_sync_fail_threshold: int = 50
+
 
 # Singleton settings instance
 settings = Settings()
