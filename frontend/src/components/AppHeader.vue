@@ -1,16 +1,18 @@
 <script setup>
-import { CalendarDays, RefreshCw, Download, LogOut, Shield, FileSpreadsheet, BarChart3 } from 'lucide-vue-next'
+import { CalendarDays, RefreshCw, Download, LogOut, Shield, FileSpreadsheet, BarChart3, Briefcase } from 'lucide-vue-next'
 
 const props = defineProps({
   syncing: { type: Boolean, default: false },
   exporting: { type: Boolean, default: false },
+  tripSyncing: { type: Boolean, default: false },
+  tripExporting: { type: Boolean, default: false },
   syncYear: { type: Number, default: new Date().getFullYear() },
   activePage: { type: String, default: 'export' },
   currentUser: { type: Object, default: null },
   isAdmin: { type: Boolean, default: false }
 })
 
-const emit = defineEmits(['sync', 'export', 'page-change', 'logout'])
+const emit = defineEmits(['sync', 'export', 'trip-sync', 'trip-export', 'page-change', 'logout'])
 </script>
 
 <template>
@@ -20,7 +22,7 @@ const emit = defineEmits(['sync', 'export', 'page-change', 'logout'])
   >
     <div class="flex items-center gap-3">
       <CalendarDays class="text-accent" :size="28" :stroke-width="1.8" />
-      <span class="text-lg font-semibold text-text-primary">员工请假管理系统</span>
+      <span class="text-lg font-semibold text-text-primary">员工考勤系统</span>
 
       <nav class="flex items-center gap-1 ml-4">
         <button
@@ -30,7 +32,16 @@ const emit = defineEmits(['sync', 'export', 'page-change', 'logout'])
             : 'text-text-secondary font-medium hover:text-text-primary'"
           @click="emit('page-change', 'export')"
         >
-          数据导出
+          请假数据
+        </button>
+        <button
+          class="px-3 py-1.5 text-[13px] rounded-md transition-colors"
+          :class="activePage === 'trip'
+            ? 'bg-highlight text-accent font-semibold'
+            : 'text-text-secondary font-medium hover:text-text-primary'"
+          @click="emit('page-change', 'trip')"
+        >
+          外出/出差
         </button>
         <button
           class="px-3 py-1.5 text-[13px] rounded-md transition-colors"
@@ -74,6 +85,26 @@ const emit = defineEmits(['sync', 'export', 'page-change', 'logout'])
       >
         <Download :size="16" />
         {{ exporting ? '导出中...' : '导出 Excel' }}
+      </button>
+
+      <button
+        v-if="activePage === 'trip' && isAdmin"
+        class="flex items-center gap-2 px-3 lg:px-4 py-2 text-sm font-medium text-text-secondary border border-border-default rounded-lg hover:bg-surface transition-colors"
+        :disabled="tripSyncing"
+        @click="emit('trip-sync')"
+      >
+        <RefreshCw :size="16" :class="{ 'animate-spin': tripSyncing }" />
+        {{ tripSyncing ? '同步中...' : '同步外出/出差' }}
+      </button>
+
+      <button
+        v-if="activePage === 'trip'"
+        class="flex items-center gap-2 px-3 lg:px-5 py-2 text-sm font-semibold text-white bg-accent rounded-lg hover:bg-blue-700 transition-colors"
+        :disabled="tripExporting"
+        @click="emit('trip-export')"
+      >
+        <Download :size="16" />
+        {{ tripExporting ? '导出中...' : '导出 Excel' }}
       </button>
 
       <div class="w-px h-6 bg-border-default"></div>
@@ -153,7 +184,15 @@ const emit = defineEmits(['sync', 'export', 'page-change', 'logout'])
       @click="emit('page-change', 'export')"
     >
       <FileSpreadsheet :size="20" :stroke-width="activePage === 'export' ? 2.2 : 1.6" />
-      <span class="text-[10px] font-medium">数据导出</span>
+      <span class="text-[10px] font-medium">请假数据</span>
+    </button>
+    <button
+      class="flex-1 flex flex-col items-center justify-center gap-0.5 py-2 transition-colors"
+      :class="activePage === 'trip' ? 'text-accent' : 'text-text-tertiary'"
+      @click="emit('page-change', 'trip')"
+    >
+      <Briefcase :size="20" :stroke-width="activePage === 'trip' ? 2.2 : 1.6" />
+      <span class="text-[10px] font-medium">外出/出差</span>
     </button>
     <button
       class="flex-1 flex flex-col items-center justify-center gap-0.5 py-2 transition-colors"

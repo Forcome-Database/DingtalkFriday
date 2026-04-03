@@ -2,6 +2,7 @@
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useAnalyticsData } from '../composables/useAnalyticsData.js'
 import apiClient from '../api/index.js'
+import TripAnalyticsSection from './TripAnalyticsSection.vue'
 
 // ECharts tree-shakable imports
 import * as echarts from 'echarts/core'
@@ -700,6 +701,15 @@ onUnmounted(() => {
       <div class="bg-white rounded-xl border border-border-default p-6">
         <h2 class="text-sm font-semibold text-text-primary mb-4">请假排行 Top 10</h2>
         <div ref="rankingChartRef" class="w-full" style="height: 380px"></div>
+      </div>
+
+      <!-- Trip Analytics Section -->
+      <div class="border-t border-border-default pt-6 mt-2">
+        <div class="mb-6">
+          <h1 class="text-2xl font-semibold text-text-primary">出差分析</h1>
+          <p class="text-sm text-text-secondary mt-1">可视化展示员工出差与外出数据统计</p>
+        </div>
+        <TripAnalyticsSection :year="year" />
       </div>
     </template>
   </div>

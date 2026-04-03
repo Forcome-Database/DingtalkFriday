@@ -98,7 +98,10 @@ async def get_vacation_record_list(
         record_num_per_day, record_num_per_hour,
         leave_view_unit, leave_status, cal_type
     }
-    Only returns records with leave_status='success' and cal_type=null (actual leave).
+    Only returns records with leave_status='success'.
+    Records include both normal consumption (cal_type=null) and
+    reversals (cal_type!=null, e.g. when approval is revoked).
+    Callers should use cal_type to detect reversed/cancelled leaves.
     """
     records: List[Dict[str, Any]] = []
     current_offset = offset
@@ -119,10 +122,7 @@ async def get_vacation_record_list(
         leave_records = result.get("leave_records", [])
 
         for item in leave_records:
-            # Only keep actual leave records (cal_type=null means leave consumption)
             if item.get("leave_status") != "success":
-                continue
-            if item.get("cal_type") is not None:
                 continue
             records.append({
                 "userid": item.get("userid"),
@@ -133,6 +133,7 @@ async def get_vacation_record_list(
                 "record_num_per_hour": item.get("record_num_per_hour"),
                 "leave_view_unit": item.get("leave_view_unit"),
                 "leave_status": item.get("leave_status"),
+                "cal_type": item.get("cal_type"),
             })
 
         has_more = result.get("has_more", False)
@@ -179,3 +180,25 @@ async def get_vacation_type_list(op_userid: str) -> List[Dict[str, Any]]:
         })
     logger.info("Fetched %d vacation types", len(types))
     return types
+
+
+async def get_update_data(userid: str, work_date: str) -> Dict[str, Any]:
+    """
+    Query a user's attendance data for a specific date.
+
+    POST /topapi/attendance/getupdatedata
+    Body: { userid, work_date }
+
+    Returns the full response dict containing:
+    - approve_list: list of approval records with biz_type, tag_name, etc.
+    - check_record_list: clock-in records
+    - attendance_result_list: attendance results
+    """
+    data = await dingtalk_client.post(
+        "/topapi/attendance/getupdatedata",
+        json_body={
+            "userid": userid,
+            "work_date": work_date,
+        },
+    )
+    return data.get("result", {})

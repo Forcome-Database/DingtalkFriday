@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.database import async_session, init_db
-from app.routers import admin, analytics, auth, departments, export, leave, sync
+from app.routers import admin, analytics, auth, departments, export, leave, sync, trip, trip_analytics
 
 # Configure logging
 logging.basicConfig(
@@ -45,13 +45,19 @@ async def _ensure_admin_users() -> None:
             result = await session.execute(
                 select(AllowedUser).where(AllowedUser.mobile == phone)
             )
-            if not result.scalar_one_or_none():
+            existing = result.scalar_one_or_none()
+            if not existing:
                 session.add(AllowedUser(
                     mobile=phone,
                     name="管理员",
+                    role="admin",
                     created_at=datetime.utcnow(),
                 ))
                 logger.info("Added admin phone %s to allowed_user table", phone)
+            elif getattr(existing, "role", None) != "admin":
+                existing.role = "admin"
+                session.add(existing)
+                logger.info("Updated admin phone %s role to admin", phone)
         await session.commit()
 
 
@@ -67,8 +73,10 @@ def _setup_scheduler():
         from apscheduler.schedulers.asyncio import AsyncIOScheduler
         from apscheduler.triggers.cron import CronTrigger
 
-        _scheduler = AsyncIOScheduler()
-        trigger = CronTrigger.from_crontab(cron_expr)
+        from zoneinfo import ZoneInfo
+        tz = ZoneInfo("Asia/Shanghai")
+        _scheduler = AsyncIOScheduler(timezone=tz)
+        trigger = CronTrigger.from_crontab(cron_expr, timezone=tz)
 
         async def scheduled_sync():
             """Run full sync as a scheduled job."""
@@ -84,6 +92,44 @@ def _setup_scheduler():
         logger.info("APScheduler started with cron: %s", cron_expr)
     except Exception as e:
         logger.exception("Failed to setup scheduler: %s", e)
+
+
+def _setup_trip_scheduler():
+    """Set up APScheduler for trip sync if enabled."""
+    global _scheduler
+    if not settings.trip_sync_enabled:
+        logger.info("Trip sync disabled")
+        return
+    cron_expr = settings.trip_sync_cron.strip()
+    if not cron_expr:
+        return
+
+    try:
+        from apscheduler.schedulers.asyncio import AsyncIOScheduler
+        from apscheduler.triggers.cron import CronTrigger
+
+        from zoneinfo import ZoneInfo
+        tz = ZoneInfo("Asia/Shanghai")
+        if _scheduler is None:
+            _scheduler = AsyncIOScheduler(timezone=tz)
+
+        trigger = CronTrigger.from_crontab(cron_expr, timezone=tz)
+
+        async def scheduled_trip_sync():
+            """Run trip sync as a scheduled job."""
+            logger.info("Scheduled trip sync triggered by cron: %s", cron_expr)
+            try:
+                from app.services.trip_sync import sync_trip_records
+                await sync_trip_records()
+            except Exception as e:
+                logger.exception("Scheduled trip sync failed: %s", e)
+
+        _scheduler.add_job(scheduled_trip_sync, trigger, id="trip_sync", replace_existing=True)
+        if not _scheduler.running:
+            _scheduler.start()
+        logger.info("Trip sync scheduled: %s", cron_expr)
+    except Exception as e:
+        logger.exception("Failed to setup trip scheduler: %s", e)
 
 
 @asynccontextmanager
@@ -103,6 +149,7 @@ async def lifespan(app: FastAPI):
 
     # Start scheduled sync if configured
     _setup_scheduler()
+    _setup_trip_scheduler()
 
     yield
 
@@ -144,6 +191,8 @@ app.include_router(leave.router)
 app.include_router(export.router)
 app.include_router(sync.router)
 app.include_router(analytics.router)
+app.include_router(trip.router)
+app.include_router(trip_analytics.router)
 
 
 # Health check endpoint

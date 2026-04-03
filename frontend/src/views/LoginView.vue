@@ -131,7 +131,7 @@ onMounted(() => {
         <div class="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-accent/10 mb-4">
           <CalendarDays class="text-accent" :size="32" :stroke-width="1.8" />
         </div>
-        <h1 class="text-2xl font-bold text-text-primary">员工请假管理系统</h1>
+        <h1 class="text-2xl font-bold text-text-primary">员工考勤系统</h1>
         <p class="text-sm text-text-secondary mt-2">请通过钉钉工作台访问</p>
       </div>
 

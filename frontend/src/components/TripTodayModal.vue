@@ -1,6 +1,6 @@
 <script setup>
 import { computed } from 'vue'
-import { X, Clock, CheckCircle, AlertCircle, XCircle, UserMinus, Download, ChevronLeft, ChevronRight } from 'lucide-vue-next'
+import { X, Clock, Briefcase, Download, ChevronLeft, ChevronRight } from 'lucide-vue-next'
 
 const props = defineProps({
   /** Whether the modal is visible */
@@ -8,20 +8,20 @@ const props = defineProps({
     type: Boolean,
     default: false
   },
-  /** Leave detail data from API */
-  data: {
-    type: Object,
-    default: null
+  /** Trip/outing detail list from API */
+  detail: {
+    type: Array,
+    default: () => []
   },
   /** Whether data is loading */
   loading: {
     type: Boolean,
     default: false
   },
-  /** Leave type color options from useLeaveData */
-  leaveTypeOptions: {
-    type: Array,
-    default: () => []
+  /** Trip type filter: '出差', '外出', or '' for all */
+  tripType: {
+    type: String,
+    default: ''
   },
   /** Currently selected date (YYYY-MM-DD) */
   selectedDate: {
@@ -37,10 +37,21 @@ const todayStr = new Date().toISOString().slice(0, 10)
 const isToday = computed(() => props.selectedDate === todayStr)
 
 const displayDate = computed(() => {
-  if (!props.selectedDate) return '今日'
-  if (isToday.value) return '今日'
+  if (!props.selectedDate || isToday.value) return '今日'
   const [y, m, d] = props.selectedDate.split('-')
   return `${parseInt(m)}月${parseInt(d)}日`
+})
+
+/** Unique person count (deduplicated by employeeId) */
+const uniqueCount = computed(() => {
+  return new Set(props.detail.map(d => d.employeeId)).size
+})
+
+/** Dynamic title based on tripType */
+const title = computed(() => {
+  if (props.tripType === '出差') return '出差详情'
+  if (props.tripType === '外出') return '外出详情'
+  return '外出/出差详情'
 })
 
 function prevDay() {
@@ -63,26 +74,14 @@ function goToday() {
   emit('date-change', todayStr)
 }
 
-/** Status badge configuration */
-const statusConfig = {
-  '已审批': { icon: CheckCircle, class: 'text-green-600 bg-green-50' },
-  '审批中': { icon: AlertCircle, class: 'text-yellow-600 bg-yellow-50' },
-  '已驳回': { icon: XCircle, class: 'text-red-600 bg-red-50' }
+function getTagConfig(tagName) {
+  if (tagName === '出差') return { bgColor: 'bg-orange-50', textColor: 'text-orange-600' }
+  if (tagName === '外出') return { bgColor: 'bg-blue-50', textColor: 'text-blue-600' }
+  return { bgColor: 'bg-gray-100', textColor: 'text-gray-600' }
 }
-
-const fallbackColor = { bgColor: 'bg-gray-100', textColor: 'text-gray-600' }
 
 function getInitial(name) {
   return name ? name.charAt(0) : '?'
-}
-
-function getTypeColor(typeName) {
-  const opt = props.leaveTypeOptions.find(t => t.name === typeName)
-  return opt || fallbackColor
-}
-
-function getStatusConfig(status) {
-  return statusConfig[status] || statusConfig['已审批']
 }
 
 function onOverlayClick(event) {
@@ -110,13 +109,13 @@ function onOverlayClick(event) {
             <div class="p-4 sm:p-6 pb-4 border-b border-border-default">
               <div class="flex items-center justify-between">
                 <div class="flex items-center gap-3">
-                  <div class="w-10 h-10 rounded-lg bg-red-50 flex items-center justify-center flex-shrink-0">
-                    <UserMinus :size="20" class="text-red-500" />
+                  <div class="w-10 h-10 rounded-lg bg-orange-50 flex items-center justify-center flex-shrink-0">
+                    <Briefcase :size="20" class="text-orange-500" />
                   </div>
                   <div>
-                    <div class="text-base font-semibold text-text-primary">请假详情</div>
+                    <div class="text-base font-semibold text-text-primary">{{ title }}</div>
                     <div class="text-[13px] text-text-secondary mt-0.5">
-                      共 <span class="font-medium text-text-primary">{{ data?.count ?? 0 }}</span> 人请假
+                      共 <span class="font-medium text-text-primary">{{ uniqueCount }}</span> 人
                     </div>
                   </div>
                 </div>
@@ -168,7 +167,7 @@ function onOverlayClick(event) {
 
                 <button
                   class="flex items-center gap-1.5 px-3 py-1.5 text-[13px] font-medium text-text-secondary rounded-lg border border-border-default hover:bg-surface hover:text-text-primary transition-colors"
-                  :disabled="!data || !data.records || data.records.length === 0"
+                  :disabled="detail.length === 0"
                   @click="emit('export')"
                 >
                   <Download :size="14" />
@@ -196,64 +195,50 @@ function onOverlayClick(event) {
                 </div>
               </div>
 
-              <template v-else-if="data">
+              <template v-else>
                 <!-- Empty state -->
                 <div
-                  v-if="data.records && data.records.length === 0"
+                  v-if="detail.length === 0"
                   class="flex flex-col items-center justify-center py-16 text-text-tertiary"
                 >
-                  <UserMinus :size="48" class="mb-3 opacity-30" />
-                  <span class="text-sm">{{ isToday ? '今日无人请假' : '当日无人请假' }}</span>
+                  <Briefcase :size="48" class="mb-3 opacity-30" />
+                  <span class="text-sm">{{ isToday ? '今日无外出/出差记录' : '当日无外出/出差记录' }}</span>
                 </div>
 
                 <!-- Records list -->
                 <div v-else class="space-y-3">
                   <div
-                    v-for="(record, idx) in data.records"
+                    v-for="(record, idx) in detail"
                     :key="idx"
                     class="rounded-xl border-[1.5px] border-border-default p-3 sm:p-4"
                   >
                     <div class="flex items-start justify-between mb-2">
                       <div class="flex items-center gap-2.5">
-                        <img
-                          v-if="record.avatar"
-                          :src="record.avatar"
-                          :alt="record.name"
-                          class="w-8 h-8 rounded-full object-cover flex-shrink-0"
-                        />
                         <div
-                          v-else
                           class="w-8 h-8 rounded-full bg-accent text-white text-sm font-semibold flex items-center justify-center flex-shrink-0"
                         >
-                          {{ getInitial(record.name) }}
+                          {{ getInitial(record.employeeName) }}
                         </div>
                         <div>
-                          <div class="text-sm font-medium text-text-primary">{{ record.name }}</div>
+                          <div class="text-sm font-medium text-text-primary">{{ record.employeeName }}</div>
                           <div class="text-[12px] text-text-tertiary">{{ record.deptName }}</div>
                         </div>
                       </div>
-                      <div
-                        class="flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium flex-shrink-0"
-                        :class="getStatusConfig(record.status).class"
+                      <span
+                        class="inline-flex items-center px-2 py-0.5 rounded text-[12px] font-medium flex-shrink-0"
+                        :class="[getTagConfig(record.tagName).bgColor, getTagConfig(record.tagName).textColor]"
                       >
-                        <component :is="getStatusConfig(record.status).icon" :size="12" />
-                        {{ record.status }}
-                      </div>
+                        {{ record.tagName }}
+                      </span>
                     </div>
 
                     <div class="flex items-center gap-2 flex-wrap">
-                      <span
-                        class="inline-flex items-center px-2 py-0.5 rounded text-[12px] font-medium"
-                        :class="[getTypeColor(record.leaveType).bgColor, getTypeColor(record.leaveType).textColor]"
-                      >
-                        {{ record.leaveType }}
-                      </span>
                       <div class="flex items-center gap-1 text-[13px] text-text-secondary">
                         <Clock :size="13" class="text-text-tertiary" />
-                        <span>{{ record.timeDisplay }}</span>
+                        <span>{{ record.beginTime }} ~ {{ record.endTime }}</span>
                       </div>
                       <span class="text-[13px] text-text-tertiary">
-                        {{ record.durationDisplay }}
+                        {{ record.durationHours }}小时
                       </span>
                     </div>
                   </div>
@@ -263,13 +248,13 @@ function onOverlayClick(event) {
 
             <!-- Panel footer -->
             <div
-              v-if="data && data.records && data.records.length > 0"
+              v-if="detail.length > 0"
               class="border-t border-border-default px-4 sm:px-6 py-4 bg-surface"
             >
               <div class="flex items-center justify-between">
-                <span class="text-[13px] font-medium text-text-secondary">{{ displayDate }}请假</span>
+                <span class="text-[13px] font-medium text-text-secondary">{{ displayDate }}{{ title }}</span>
                 <span class="text-sm font-semibold text-text-primary">
-                  共 {{ data.count }} 人 · {{ data.records.length }} 条记录
+                  共 {{ uniqueCount }} 人
                 </span>
               </div>
             </div>

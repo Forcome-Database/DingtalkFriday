@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import async_session
 from app.models import Employee, LeaveRecord, LeaveType
+from app.services.dept_utils import get_descendant_dept_ids
 
 logger = logging.getLogger(__name__)
 
@@ -54,23 +55,6 @@ def _year_range_ms(year: int) -> Tuple[int, int]:
     start = int(datetime(year, 1, 1, 0, 0, 0).timestamp() * 1000)
     end = int(datetime(year, 12, 31, 23, 59, 59).timestamp() * 1000)
     return start, end
-
-
-async def _get_descendant_dept_ids(session: AsyncSession, dept_id: int) -> Set[int]:
-    """递归获取部门及其所有子部门的 ID 集合（BFS）"""
-    from app.models import Department
-    result = {dept_id}
-    queue = [dept_id]
-    while queue:
-        parent = queue.pop()
-        rows = await session.execute(
-            select(Department.dept_id).where(Department.parent_id == parent)
-        )
-        for (child_id,) in rows:
-            if child_id not in result:
-                result.add(child_id)
-                queue.append(child_id)
-    return result
 
 
 # 按自然日计算的假期类型关键词（产假、婚假等，包含周末和节假日）
@@ -224,7 +208,7 @@ async def get_monthly_summary(
         # ---- Build employee filter ----
         emp_conditions = []
         if dept_id is not None:
-            all_dept_ids = await _get_descendant_dept_ids(session, dept_id)
+            all_dept_ids = await get_descendant_dept_ids(session, dept_id)
             emp_conditions.append(Employee.dept_id.in_(all_dept_ids))
         if employee_name:
             emp_conditions.append(Employee.name.contains(employee_name))
@@ -545,7 +529,7 @@ async def get_daily_leave_count(
         # ---- Employee filter (same logic as monthly_summary) ----
         emp_conditions = []
         if dept_id is not None:
-            all_dept_ids = await _get_descendant_dept_ids(session, dept_id)
+            all_dept_ids = await get_descendant_dept_ids(session, dept_id)
             emp_conditions.append(Employee.dept_id.in_(all_dept_ids))
         if employee_name:
             emp_conditions.append(Employee.name.contains(employee_name))
@@ -667,19 +651,21 @@ async def get_today_leave_detail(
     dept_id: Optional[int] = None,
     leave_types: Optional[List[str]] = None,
     employee_name: Optional[str] = None,
+    target_date: Optional[date_type] = None,
 ) -> dict:
     """
-    Get detailed leave records for today.
+    Get detailed leave records for a specific date (defaults to today).
 
     Returns a dict matching TodayLeaveDetailResponse schema:
     {
-        count: int  -- distinct person count on leave today,
+        date: str   -- the queried date (YYYY-MM-DD),
+        count: int  -- distinct person count on leave,
         records: [{ userid, name, avatar, deptName, leaveType, leaveCode,
                      startTime, endTime, durationPercent, durationUnit,
                      durationDisplay, timeDisplay, status }],
     }
     """
-    today = date_type.today()
+    today = target_date or date_type.today()
     today_start_ms = int(datetime(today.year, today.month, today.day, 0, 0, 0).timestamp() * 1000)
     today_end_ms = int(datetime(today.year, today.month, today.day, 23, 59, 59).timestamp() * 1000)
 
@@ -687,7 +673,7 @@ async def get_today_leave_detail(
         # Employee filter (same logic as get_daily_leave_count)
         emp_conditions = []
         if dept_id is not None:
-            all_dept_ids = await _get_descendant_dept_ids(session, dept_id)
+            all_dept_ids = await get_descendant_dept_ids(session, dept_id)
             emp_conditions.append(Employee.dept_id.in_(all_dept_ids))
         if employee_name:
             emp_conditions.append(Employee.name.contains(employee_name))
@@ -792,6 +778,7 @@ async def get_today_leave_detail(
     result_records.sort(key=lambda r: r["name"])
 
     return {
+        "date": today.isoformat(),
         "count": len(person_ids),
         "records": result_records,
     }

@@ -82,10 +82,19 @@ export default {
 
   /**
    * Add an allowed user (admin only)
-   * @param {{ mobile: string, name?: string }} data
+   * @param {{ mobile: string, name?: string, role?: string }} data
    */
   addUser(data) {
     return api.post('/admin/users', data)
+  },
+
+  /**
+   * Update an allowed user's role (admin only)
+   * @param {string} mobile
+   * @param {string} role - 'admin' or 'user'
+   */
+  updateUserRole(mobile, role) {
+    return api.patch(`/admin/users/${mobile}/role`, { role })
   },
 
   /**
@@ -159,15 +168,31 @@ export default {
   },
 
   /**
-   * Get today's leave detail (list of employees on leave with time info)
+   * Get leave detail for a specific date (defaults to today)
    */
   getTodayLeaveDetail(params) {
     return api.get('/leave/today-detail', {
       params: {
         deptId: params.deptId || undefined,
         leaveTypes: params.leaveTypes?.length ? params.leaveTypes.join(',') : undefined,
-        employeeName: params.employeeName || undefined
+        employeeName: params.employeeName || undefined,
+        date: params.date || undefined
       }
+    })
+  },
+
+  /**
+   * Export leave detail for a specific date as Excel
+   */
+  exportLeaveDetail(params) {
+    return api.get('/leave/today-detail/export', {
+      params: {
+        deptId: params.deptId || undefined,
+        leaveTypes: params.leaveTypes?.length ? params.leaveTypes.join(',') : undefined,
+        employeeName: params.employeeName || undefined,
+        date: params.date || undefined
+      },
+      responseType: 'blob'
     })
   },
 
@@ -220,5 +245,133 @@ export default {
 
   getEmployeeRanking(year, limit = 10) {
     return api.get('/analytics/employee-ranking', { params: { year, limit } })
-  }
+  },
+
+  // --- Trip Analytics API ---
+
+  getTripMonthlyTrend(year) {
+    return api.get('/analytics/trip/monthly-trend', { params: { year } })
+  },
+
+  getTripTypeDistribution(year) {
+    return api.get('/analytics/trip/type-distribution', { params: { year } })
+  },
+
+  getTripDepartmentComparison(year, metric = 'total') {
+    return api.get('/analytics/trip/department-comparison', { params: { year, metric } })
+  },
+
+  getTripWeekdayDistribution(year) {
+    return api.get('/analytics/trip/weekday-distribution', { params: { year } })
+  },
+
+  getTripEmployeeRanking(year, limit = 10) {
+    return api.get('/analytics/trip/employee-ranking', { params: { year, limit } })
+  },
+
+  // --- Trip (business trip / out-of-office) API ---
+
+  /**
+   * Get monthly trip summary data (paginated)
+   */
+  getTripMonthlySummary(params) {
+    return api.get('/trip/monthly-summary', {
+      params: {
+        year: params.year,
+        deptId: params.deptId || undefined,
+        tripType: params.tripType || undefined,
+        employeeName: params.employeeName || undefined,
+        page: params.page || 1,
+        pageSize: params.pageSize || 10,
+        sortBy: params.sortBy || undefined,
+        sortOrder: params.sortOrder || 'desc',
+      }
+    })
+  },
+
+  /**
+   * Get daily trip detail records for an employee in a specific month
+   */
+  getTripDailyDetail(params) {
+    return api.get('/trip/daily-detail', {
+      params: { employeeId: params.employeeId, year: params.year, month: params.month }
+    })
+  },
+
+  /**
+   * Get trip/outing list for a specific date (defaults to today)
+   */
+  getTripToday(params = {}) {
+    return api.get('/trip/today', {
+      params: {
+        deptId: params.deptId || undefined,
+        tripType: params.tripType || undefined,
+        employeeName: params.employeeName || undefined,
+        date: params.date || undefined,
+      }
+    })
+  },
+
+  /**
+   * Export trip detail for a specific date as Excel
+   */
+  exportTripDetail(params = {}) {
+    return api.get('/trip/today/export', {
+      params: {
+        deptId: params.deptId || undefined,
+        tripType: params.tripType || undefined,
+        employeeName: params.employeeName || undefined,
+        date: params.date || undefined,
+      },
+      responseType: 'blob'
+    })
+  },
+
+  /**
+   * Get trip aggregate stats for a year
+   */
+  getTripStats(params) {
+    return api.get('/trip/stats', {
+      params: {
+        year: params.year,
+        deptId: params.deptId || undefined,
+        tripType: params.tripType || undefined,
+        employeeName: params.employeeName || undefined,
+      }
+    })
+  },
+
+  /**
+   * Get per-day trip/outing headcount for a given month
+   */
+  getTripDailyCount(params) {
+    return api.get('/trip/daily-count', {
+      params: {
+        year: params.year, month: params.month,
+        deptId: params.deptId || undefined,
+        tripType: params.tripType || undefined,
+        employeeName: params.employeeName || undefined,
+      }
+    })
+  },
+
+  /**
+   * Export trip data as Excel file (returns blob)
+   */
+  exportTripExcel(params) {
+    return api.post('/trip/export', {
+      year: params.year,
+      deptId: params.deptId || null,
+      tripType: params.tripType || null,
+      employeeName: params.employeeName || null,
+    }, { responseType: 'blob' })
+  },
+
+  /**
+   * Trigger trip data sync from DingTalk
+   * @param {string|null} month - optional YYYY-MM format to force-sync a specific month
+   */
+  triggerTripSync(month) {
+    return api.post('/trip/sync', { month: month || null })
+  },
 }

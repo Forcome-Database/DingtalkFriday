@@ -3,7 +3,7 @@ Pydantic request/response schemas for all API endpoints.
 """
 
 from datetime import datetime
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -51,6 +51,12 @@ class AddUserRequest(BaseModel):
     """Request body for POST /api/admin/users."""
     mobile: str = Field(description="Phone number")
     name: Optional[str] = Field(default=None, description="Display name")
+    role: str = Field(default="user", description="Role: admin or user")
+
+
+class UpdateUserRoleRequest(BaseModel):
+    """Request body for PATCH /api/admin/users/{mobile}/role."""
+    role: str = Field(description="Role: admin or user")
 
 
 class AllowedUserOut(BaseModel):
@@ -59,6 +65,7 @@ class AllowedUserOut(BaseModel):
     mobile: str
     name: Optional[str] = None
     userid: Optional[str] = None
+    role: str = "user"
     created_at: Optional[datetime] = None
     isAdmin: bool = False
 
@@ -122,6 +129,7 @@ class PaginationInfo(BaseModel):
     page: int
     pageSize: int
     total: int
+    totalPages: int = 0
 
 
 class MonthlySummaryResponse(BaseModel):
@@ -303,6 +311,22 @@ class EmployeeRankingResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Trip Analytics schemas
+# ---------------------------------------------------------------------------
+
+class TripTrendLine(BaseModel):
+    """Single month data point for the trip monthly trend chart."""
+    month: int = Field(description="Month number (1-12)")
+    days: float = Field(description="Total trip/outing days in this month")
+
+
+class TripMonthlyTrendResponse(BaseModel):
+    """Response for GET /api/analytics/trip/monthly-trend."""
+    trip: List[TripTrendLine] = Field(description="Business trip monthly days")
+    outing: List[TripTrendLine] = Field(description="Out-of-office monthly days")
+
+
+# ---------------------------------------------------------------------------
 # Today leave detail schemas
 # ---------------------------------------------------------------------------
 
@@ -325,7 +349,8 @@ class TodayLeaveRecord(BaseModel):
 
 class TodayLeaveDetailResponse(BaseModel):
     """Response for GET /api/leave/today-detail."""
-    count: int = Field(description="Distinct person count on leave today")
+    date: str = Field(default="", description="Queried date (YYYY-MM-DD)")
+    count: int = Field(description="Distinct person count on leave")
     records: List[TodayLeaveRecord]
 
 
@@ -337,3 +362,88 @@ class MessageResponse(BaseModel):
     """Generic message response."""
     message: str
     success: bool = True
+
+
+# ---------------------------------------------------------------------------
+# Trip (business trip / out-of-office) schemas
+# ---------------------------------------------------------------------------
+
+class TripStats(BaseModel):
+    totalCount: int = Field(description="Total person-trips (distinct proc_inst_id per user)")
+    totalDays: float = Field(description="Total days (sum of duration_hours / 8)")
+    todayTripCount: int = Field(description="Today's business trip headcount")
+    todayOutingCount: int = Field(description="Today's out-of-office headcount")
+
+
+class TripEmployeeRow(BaseModel):
+    employeeId: str
+    employeeName: str
+    deptName: Optional[str] = None
+    tripDays: float = Field(description="Business trip total days")
+    outingDays: float = Field(description="Out-of-office total days")
+    totalDays: float = Field(description="Combined total days")
+    tripCount: int = Field(description="Business trip count (distinct)")
+    outingCount: int = Field(description="Out-of-office count (distinct)")
+    months: Dict[str, float] = Field(description="Per-month days: {'1': 2.5, '2': 0, ...}")
+
+
+class TripSummaryRow(BaseModel):
+    tripDays: float = 0
+    outingDays: float = 0
+    totalDays: float = 0
+    months: Dict[str, float] = Field(default_factory=dict)
+
+
+class TripMonthlySummaryResponse(BaseModel):
+    stats: TripStats
+    list: List[TripEmployeeRow]
+    summary: TripSummaryRow
+    pagination: PaginationInfo
+
+
+class TripDayRecord(BaseModel):
+    date: str = Field(description="YYYY-MM-DD")
+    tagName: str = Field(description="出差 or 外出")
+    durationHours: float
+    startTime: str = Field(description="Display start time for this day, e.g. 09:00")
+    endTime: str = Field(description="Display end time for this day, e.g. 18:00")
+    hours: float = Field(description="Hours for this day (alias of durationHours)")
+    leaveType: str = Field(description="Alias of tagName for calendar modal compatibility")
+    status: str = Field(default="已审批")
+
+
+class TripDailyDetailResponse(BaseModel):
+    employeeName: str
+    employee: Optional[dict] = None
+    records: List[TripDayRecord]
+    summary: Optional[dict] = None
+
+
+class TripTodayItem(BaseModel):
+    employeeId: str
+    employeeName: str
+    deptName: Optional[str] = None
+    tagName: str
+    beginTime: str
+    endTime: str
+    durationHours: float
+
+
+class TripTodayResponse(BaseModel):
+    date: str = Field(default="", description="Queried date (YYYY-MM-DD)")
+    list: List[TripTodayItem]
+
+
+class TripExportRequest(BaseModel):
+    year: int
+    deptId: Optional[int] = None
+    tripType: Optional[str] = None
+    employeeName: Optional[str] = None
+
+
+class TripSyncRequest(BaseModel):
+    month: Optional[str] = Field(default=None, description="YYYY-MM format, optional")
+
+
+# Alias for router response_model consistency
+TripStatsResponse = TripStats

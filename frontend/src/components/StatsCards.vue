@@ -1,5 +1,5 @@
 <script setup>
-import { Users, CalendarDays, TrendingUp, PieChart, UserMinus } from 'lucide-vue-next'
+import { Users, CalendarDays, TrendingUp, PieChart, UserMinus, Briefcase } from 'lucide-vue-next'
 
 const props = defineProps({
   /** Statistics data object from API */
@@ -22,14 +22,19 @@ const props = defineProps({
   todayLeaveCount: {
     type: Number,
     default: 0
+  },
+  /** Today's trip/outing headcount */
+  todayTripCount: {
+    type: Number,
+    default: 0
   }
 })
 
-const emit = defineEmits(['todayLeaveClick'])
+const emit = defineEmits(['todayLeaveClick', 'todayTripClick'])
 </script>
 
 <template>
-  <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">
+  <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
     <!-- Card 1: Total leave count -->
     <div class="rounded-xl border-[1.5px] border-border-default p-4 sm:p-5">
       <div class="flex items-center justify-between mb-2">
@@ -110,6 +115,25 @@ const emit = defineEmits(['todayLeaveClick'])
       <div class="flex items-end gap-2">
         <span class="text-xl sm:text-2xl lg:text-[28px] font-bold text-text-primary leading-none">
           {{ todayLeaveCount }}
+        </span>
+        <span class="text-[13px] text-text-tertiary pb-0.5">人</span>
+      </div>
+    </div>
+
+    <!-- Card 6: Today trip/outing -->
+    <div
+      class="rounded-xl border-[1.5px] border-border-default p-4 sm:p-5 cursor-pointer hover:border-accent/40 hover:shadow-sm transition-all"
+      @click="emit('todayTripClick')"
+    >
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-[13px] font-medium text-text-secondary">今日外出/出差</span>
+        <div class="w-9 h-9 rounded-lg bg-orange-50 flex items-center justify-center">
+          <Briefcase :size="18" class="text-orange-600" />
+        </div>
+      </div>
+      <div class="flex items-end gap-2">
+        <span class="text-xl sm:text-2xl lg:text-[28px] font-bold text-orange-600 leading-none">
+          {{ todayTripCount }}
         </span>
         <span class="text-[13px] text-text-tertiary pb-0.5">人</span>
       </div>
