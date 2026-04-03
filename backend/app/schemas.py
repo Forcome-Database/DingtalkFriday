@@ -311,6 +311,22 @@ class EmployeeRankingResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Trip Analytics schemas
+# ---------------------------------------------------------------------------
+
+class TripTrendLine(BaseModel):
+    """Single month data point for the trip monthly trend chart."""
+    month: int = Field(description="Month number (1-12)")
+    days: float = Field(description="Total trip/outing days in this month")
+
+
+class TripMonthlyTrendResponse(BaseModel):
+    """Response for GET /api/analytics/trip/monthly-trend."""
+    trip: List[TripTrendLine] = Field(description="Business trip monthly days")
+    outing: List[TripTrendLine] = Field(description="Out-of-office monthly days")
+
+
+# ---------------------------------------------------------------------------
 # Today leave detail schemas
 # ---------------------------------------------------------------------------
 
