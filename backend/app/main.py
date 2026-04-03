@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.database import async_session, init_db
-from app.routers import admin, analytics, auth, departments, export, leave, sync, trip
+from app.routers import admin, analytics, auth, departments, export, leave, sync, trip, trip_analytics
 
 # Configure logging
 logging.basicConfig(
@@ -192,6 +192,7 @@ app.include_router(export.router)
 app.include_router(sync.router)
 app.include_router(analytics.router)
 app.include_router(trip.router)
+app.include_router(trip_analytics.router)
 
 
 # Health check endpoint
