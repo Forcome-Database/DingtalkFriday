@@ -164,6 +164,110 @@ async def export_leave_data(
     return output
 
 
+def export_leave_detail(data: dict) -> io.BytesIO:
+    """
+    Generate an Excel file from leave detail records (single-date view).
+
+    Columns: 姓名, 部门, 请假类型, 时间段, 时长, 状态
+    """
+    records = data.get("records", [])
+    date_str = data.get("date", "")
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = f"请假详情 {date_str}"
+
+    headers = ["姓名", "部门", "请假类型", "时间段", "时长", "状态"]
+    for col, header in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col, value=header)
+        cell.fill = HEADER_FILL
+        cell.font = HEADER_FONT
+        cell.alignment = CENTER_ALIGN
+        cell.border = THIN_BORDER
+
+    for row_idx, rec in enumerate(records, 2):
+        values = [
+            rec.get("name", ""),
+            rec.get("deptName", ""),
+            rec.get("leaveType", ""),
+            rec.get("timeDisplay", ""),
+            rec.get("durationDisplay", ""),
+            rec.get("status", ""),
+        ]
+        for col, val in enumerate(values, 1):
+            cell = ws.cell(row=row_idx, column=col, value=val)
+            cell.font = DATA_FONT
+            cell.alignment = CENTER_ALIGN if col > 2 else LEFT_ALIGN
+            cell.border = THIN_BORDER
+
+    ws.column_dimensions["A"].width = 14
+    ws.column_dimensions["B"].width = 20
+    ws.column_dimensions["C"].width = 16
+    ws.column_dimensions["D"].width = 18
+    ws.column_dimensions["E"].width = 10
+    ws.column_dimensions["F"].width = 10
+
+    ws.freeze_panes = "A2"
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    logger.info("Exported leave detail: date=%s, records=%d", date_str, len(records))
+    return output
+
+
+def export_trip_detail(data: dict) -> io.BytesIO:
+    """
+    Generate an Excel file from trip detail records (single-date view).
+
+    Columns: 姓名, 部门, 类型, 时间段, 时长
+    """
+    records = data.get("list", [])
+    date_str = data.get("date", "")
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = f"外出出差详情 {date_str}"
+
+    headers = ["姓名", "部门", "类型", "时间段", "时长"]
+    for col, header in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col, value=header)
+        cell.fill = HEADER_FILL
+        cell.font = HEADER_FONT
+        cell.alignment = CENTER_ALIGN
+        cell.border = THIN_BORDER
+
+    for row_idx, rec in enumerate(records, 2):
+        values = [
+            rec.get("employeeName", ""),
+            rec.get("deptName", ""),
+            rec.get("tagName", ""),
+            f"{rec.get('beginTime', '')} ~ {rec.get('endTime', '')}",
+            f"{rec.get('durationHours', 0)}小时",
+        ]
+        for col, val in enumerate(values, 1):
+            cell = ws.cell(row=row_idx, column=col, value=val)
+            cell.font = DATA_FONT
+            cell.alignment = CENTER_ALIGN if col > 2 else LEFT_ALIGN
+            cell.border = THIN_BORDER
+
+    ws.column_dimensions["A"].width = 14
+    ws.column_dimensions["B"].width = 20
+    ws.column_dimensions["C"].width = 10
+    ws.column_dimensions["D"].width = 18
+    ws.column_dimensions["E"].width = 10
+
+    ws.freeze_panes = "A2"
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    logger.info("Exported trip detail: date=%s, records=%d", date_str, len(records))
+    return output
+
+
 async def export_trip_excel(
     year: int,
     dept_id: Optional[int] = None,

@@ -51,6 +51,12 @@ class AddUserRequest(BaseModel):
     """Request body for POST /api/admin/users."""
     mobile: str = Field(description="Phone number")
     name: Optional[str] = Field(default=None, description="Display name")
+    role: str = Field(default="user", description="Role: admin or user")
+
+
+class UpdateUserRoleRequest(BaseModel):
+    """Request body for PATCH /api/admin/users/{mobile}/role."""
+    role: str = Field(description="Role: admin or user")
 
 
 class AllowedUserOut(BaseModel):
@@ -59,6 +65,7 @@ class AllowedUserOut(BaseModel):
     mobile: str
     name: Optional[str] = None
     userid: Optional[str] = None
+    role: str = "user"
     created_at: Optional[datetime] = None
     isAdmin: bool = False
 
@@ -326,7 +333,8 @@ class TodayLeaveRecord(BaseModel):
 
 class TodayLeaveDetailResponse(BaseModel):
     """Response for GET /api/leave/today-detail."""
-    count: int = Field(description="Distinct person count on leave today")
+    date: str = Field(default="", description="Queried date (YYYY-MM-DD)")
+    count: int = Field(description="Distinct person count on leave")
     records: List[TodayLeaveRecord]
 
 
@@ -406,6 +414,7 @@ class TripTodayItem(BaseModel):
 
 
 class TripTodayResponse(BaseModel):
+    date: str = Field(default="", description="Queried date (YYYY-MM-DD)")
     list: List[TripTodayItem]
 
 

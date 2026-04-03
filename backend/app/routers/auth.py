@@ -11,7 +11,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 
-from app.auth import create_token, get_current_user, _get_admin_phones
+from app.auth import create_token, get_current_user, is_admin_user
 from app.config import settings
 from app.database import async_session
 from app.dingtalk.user import get_user_detail, get_user_info_by_code
@@ -70,14 +70,13 @@ async def dingtalk_login(request: DingTalkLoginRequest):
             )
 
         # Step 3: Check if user is allowed
-        admin_phones = _get_admin_phones()
-        is_admin = mobile in admin_phones
-
         async with async_session() as session:
             result = await session.execute(
                 select(AllowedUser).where(AllowedUser.mobile == mobile)
             )
             allowed = result.scalar_one_or_none()
+
+        is_admin = await is_admin_user(mobile)
 
         if not allowed and not is_admin:
             raise HTTPException(
@@ -150,9 +149,6 @@ async def dev_login(request: PhoneLoginRequest):
             detail="手机号不能为空",
         )
 
-    admin_phones = _get_admin_phones()
-    is_admin = mobile in admin_phones
-
     # Look up employee by mobile
     async with async_session() as session:
         result = await session.execute(
@@ -166,6 +162,8 @@ async def dev_login(request: PhoneLoginRequest):
             select(AllowedUser).where(AllowedUser.mobile == mobile)
         )
         allowed = result.scalar_one_or_none()
+
+    is_admin = await is_admin_user(mobile)
 
     if not allowed and not is_admin:
         raise HTTPException(
@@ -194,8 +192,7 @@ async def dev_login(request: PhoneLoginRequest):
 async def get_me(user=Depends(get_current_user)):
     """Get current authenticated user info."""
     mobile = user.get("mobile", "")
-    admin_phones = _get_admin_phones()
-    is_admin = mobile in admin_phones
+    is_admin = await is_admin_user(mobile)
 
     # Try to get fresh info from DB
     avatar = None

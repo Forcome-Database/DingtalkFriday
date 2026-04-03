@@ -276,9 +276,10 @@ async def get_trip_today(
     dept_id: Optional[int] = None,
     trip_type: Optional[str] = None,
     employee_name: Optional[str] = None,
+    target_date: Optional[date] = None,
 ) -> dict:
-    """Get today's trip/outing records."""
-    today_str = date.today().isoformat()
+    """Get trip/outing records for a specific date (defaults to today)."""
+    today_str = (target_date or date.today()).isoformat()
 
     async with async_session() as session:
         query = (
@@ -329,7 +330,7 @@ async def get_trip_today(
                 "durationHours": trip.duration_hours,
             })
 
-        return {"list": items}
+        return {"date": today_str, "list": items}
 
 
 async def get_trip_daily_count(

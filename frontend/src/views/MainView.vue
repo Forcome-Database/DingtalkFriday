@@ -47,6 +47,7 @@ const {
   todayLeaveVisible,
   todayLeaveDetail,
   todayLeaveLoading,
+  todayLeaveDate,
   syncing,
   yearOptions,
 
@@ -68,6 +69,7 @@ const {
   triggerSync,
   exportExcel,
   fetchTodayLeaveDetail,
+  exportLeaveDetail,
   closeTodayLeave
 } = useLeaveData()
 
@@ -83,7 +85,7 @@ const {
   sortOrder: tripSortOrder,
   loading: tripLoading,
   dailyTripMonth, dailyTripData, dailyTripLoading,
-  todayTripVisible, todayTripDetail, todayTripLoading, todayTripType,
+  todayTripVisible, todayTripDetail, todayTripLoading, todayTripType, todayTripDate,
   calendarVisible: tripCalendarVisible,
   calendarData: tripCalendarData,
   calendarLoading: tripCalendarLoading,
@@ -96,7 +98,7 @@ const {
   fetchDailyTripCount, setDailyTripMonth,
   fetchDailyDetail: fetchTripDailyDetail,
   closeCalendar: closeTripCalendar,
-  fetchTodayTripDetail, closeTodayTrip,
+  fetchTodayTripDetail, exportTripDetail, closeTodayTrip,
   search: tripSearch,
   resetFilters: tripResetFilters,
   goToPage: tripGoToPage,
@@ -405,7 +407,10 @@ onMounted(async () => {
       :data="todayLeaveDetail"
       :loading="todayLeaveLoading"
       :leave-type-options="leaveTypeOptions"
+      :selected-date="todayLeaveDate"
       @close="closeTodayLeave"
+      @date-change="fetchTodayLeaveDetail"
+      @export="exportLeaveDetail"
     />
 
     <!-- Today trip detail modal (page-level so it works from any page) -->
@@ -414,6 +419,9 @@ onMounted(async () => {
       :detail="todayTripDetail"
       :loading="todayTripLoading"
       :tripType="todayTripType"
+      :selected-date="todayTripDate"
+      @date-change="fetchTodayTripDetail"
+      @export="exportTripDetail"
       @close="closeTodayTrip"
     />
   </div>

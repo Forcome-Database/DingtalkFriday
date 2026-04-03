@@ -23,7 +23,7 @@ from app.services.trip import (
     get_trip_today,
     get_trip_daily_count,
 )
-from app.services.export import export_trip_excel
+from app.services.export import export_trip_excel, export_trip_detail
 from app.services.trip_sync import sync_trip_records
 
 logger = logging.getLogger(__name__)
@@ -73,10 +73,22 @@ async def today_list(
     deptId: Optional[int] = Query(default=None, description="Department ID filter"),
     tripType: Optional[str] = Query(default=None, description="出差 or 外出"),
     employeeName: Optional[str] = Query(default=None, description="Employee name keyword"),
+    date: Optional[str] = Query(default=None, description="Target date YYYY-MM-DD (defaults to today)"),
     _user=Depends(get_current_user),
 ):
-    """Get today's trip/outing records with optional department and type filtering."""
-    return await get_trip_today(dept_id=deptId, trip_type=tripType, employee_name=employeeName)
+    """Get trip/outing records for a specific date with optional filtering."""
+    from datetime import date as date_type
+
+    target_date = None
+    if date:
+        try:
+            target_date = date_type.fromisoformat(date)
+        except ValueError:
+            pass
+
+    return await get_trip_today(
+        dept_id=deptId, trip_type=tripType, employee_name=employeeName, target_date=target_date
+    )
 
 
 @router.get("/stats", response_model=TripStatsResponse)
@@ -129,6 +141,39 @@ async def export_excel(
         output,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+@router.get("/today/export")
+async def export_today_trip(
+    deptId: Optional[int] = Query(default=None),
+    tripType: Optional[str] = Query(default=None),
+    employeeName: Optional[str] = Query(default=None),
+    date: Optional[str] = Query(default=None),
+    _user=Depends(get_current_user),
+):
+    """Export trip detail for a specific date as Excel."""
+    from datetime import date as date_type
+    from urllib.parse import quote
+
+    target_date = None
+    if date:
+        try:
+            target_date = date_type.fromisoformat(date)
+        except ValueError:
+            pass
+
+    data = await get_trip_today(
+        dept_id=deptId, trip_type=tripType, employee_name=employeeName, target_date=target_date
+    )
+    output = export_trip_detail(data)
+    date_str = data.get("date", "")
+    filename = f"外出出差详情_{date_str}.xlsx"
+
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
     )
 
 

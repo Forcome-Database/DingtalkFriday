@@ -52,6 +52,7 @@ export function useTripData() {
   const todayTripDetail = ref([])
   const todayTripLoading = ref(false)
   const todayTripType = ref('')  // which card was clicked: '出差' or '外出' or ''
+  const todayTripDate = ref(new Date().toISOString().slice(0, 10))
 
   // --- Calendar modal (daily detail for one employee) ---
   const calendarVisible = ref(false)
@@ -182,26 +183,51 @@ export function useTripData() {
   }
 
   /**
-   * Fetch today's trip/outing detail list (opens today modal)
-   * @param {string} type - '出差', '外出', or '' for all
+   * Fetch trip/outing detail list (opens modal, supports any date)
+   * @param {string} typeOrDate - trip type ('出差'/'外出'/'') or date (YYYY-MM-DD)
    */
-  async function fetchTodayTripDetail(type = '') {
-    todayTripType.value = type
+  async function fetchTodayTripDetail(typeOrDate = '') {
+    // If it looks like a date, treat as date change keeping current type
+    if (/^\d{4}-\d{2}-\d{2}$/.test(typeOrDate)) {
+      todayTripDate.value = typeOrDate
+    } else {
+      todayTripType.value = typeOrDate
+    }
     todayTripVisible.value = true
     todayTripLoading.value = true
     try {
       const deptId = filters.dept2 || filters.dept1 || undefined
       const res = await api.getTripToday({
         deptId,
-        tripType: type || undefined,
+        tripType: todayTripType.value || undefined,
         employeeName: filters.employeeName || undefined,
+        date: todayTripDate.value,
       })
       todayTripDetail.value = res.list
     } catch (e) {
-      console.error('Failed to fetch today trip detail', e)
+      console.error('Failed to fetch trip detail', e)
       todayTripDetail.value = []
     } finally {
       todayTripLoading.value = false
+    }
+  }
+
+  /**
+   * Export current trip detail as Excel
+   */
+  async function exportTripDetail() {
+    try {
+      const deptId = filters.dept2 || filters.dept1 || undefined
+      const blob = await api.exportTripDetail({
+        deptId,
+        tripType: todayTripType.value || undefined,
+        employeeName: filters.employeeName || undefined,
+        date: todayTripDate.value,
+      })
+      const { saveAs } = await import('file-saver')
+      saveAs(blob, `外出出差详情_${todayTripDate.value}.xlsx`)
+    } catch (e) {
+      console.error('Export trip detail failed:', e)
     }
   }
 
@@ -211,6 +237,7 @@ export function useTripData() {
   function closeTodayTrip() {
     todayTripVisible.value = false
     todayTripDetail.value = []
+    todayTripDate.value = new Date().toISOString().slice(0, 10)
   }
 
   /**
@@ -320,6 +347,7 @@ export function useTripData() {
     todayTripDetail,
     todayTripLoading,
     todayTripType,
+    todayTripDate,
     calendarVisible,
     calendarData,
     calendarLoading,
@@ -336,6 +364,7 @@ export function useTripData() {
     fetchDailyDetail,
     closeCalendar,
     fetchTodayTripDetail,
+    exportTripDetail,
     closeTodayTrip,
     search,
     resetFilters,

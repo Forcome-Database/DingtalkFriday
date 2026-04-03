@@ -45,13 +45,19 @@ async def _ensure_admin_users() -> None:
             result = await session.execute(
                 select(AllowedUser).where(AllowedUser.mobile == phone)
             )
-            if not result.scalar_one_or_none():
+            existing = result.scalar_one_or_none()
+            if not existing:
                 session.add(AllowedUser(
                     mobile=phone,
                     name="管理员",
+                    role="admin",
                     created_at=datetime.utcnow(),
                 ))
                 logger.info("Added admin phone %s to allowed_user table", phone)
+            elif getattr(existing, "role", None) != "admin":
+                existing.role = "admin"
+                session.add(existing)
+                logger.info("Updated admin phone %s role to admin", phone)
         await session.commit()
 
 
@@ -67,8 +73,10 @@ def _setup_scheduler():
         from apscheduler.schedulers.asyncio import AsyncIOScheduler
         from apscheduler.triggers.cron import CronTrigger
 
-        _scheduler = AsyncIOScheduler()
-        trigger = CronTrigger.from_crontab(cron_expr)
+        from zoneinfo import ZoneInfo
+        tz = ZoneInfo("Asia/Shanghai")
+        _scheduler = AsyncIOScheduler(timezone=tz)
+        trigger = CronTrigger.from_crontab(cron_expr, timezone=tz)
 
         async def scheduled_sync():
             """Run full sync as a scheduled job."""
@@ -100,10 +108,12 @@ def _setup_trip_scheduler():
         from apscheduler.schedulers.asyncio import AsyncIOScheduler
         from apscheduler.triggers.cron import CronTrigger
 
+        from zoneinfo import ZoneInfo
+        tz = ZoneInfo("Asia/Shanghai")
         if _scheduler is None:
-            _scheduler = AsyncIOScheduler()
+            _scheduler = AsyncIOScheduler(timezone=tz)
 
-        trigger = CronTrigger.from_crontab(cron_expr)
+        trigger = CronTrigger.from_crontab(cron_expr, timezone=tz)
 
         async def scheduled_trip_sync():
             """Run trip sync as a scheduled job."""

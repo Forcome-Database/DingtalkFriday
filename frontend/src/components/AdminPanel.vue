@@ -1,6 +1,6 @@
 <script setup>
 import { onMounted, ref } from 'vue'
-import { UserPlus, Trash2, Loader2, AlertCircle, Users } from 'lucide-vue-next'
+import { UserPlus, Trash2, Loader2, AlertCircle, Users, Shield, ShieldCheck } from 'lucide-vue-next'
 import api from '../api/index.js'
 
 const users = ref([])
@@ -11,7 +11,13 @@ const error = ref('')
 // New user form
 const newMobile = ref('')
 const newName = ref('')
+const newRole = ref('user')
 const formError = ref('')
+
+const roleOptions = [
+  { value: 'user', label: '普通用户' },
+  { value: 'admin', label: '管理员' },
+]
 
 async function loadUsers() {
   loading.value = true
@@ -39,14 +45,28 @@ async function addUser() {
   saving.value = true
   formError.value = ''
   try {
-    await api.addUser({ mobile, name: newName.value.trim() || undefined })
+    await api.addUser({ mobile, name: newName.value.trim() || undefined, role: newRole.value })
     newMobile.value = ''
     newName.value = ''
+    newRole.value = 'user'
     await loadUsers()
   } catch (e) {
     formError.value = e.response?.data?.detail || '添加用户失败'
   } finally {
     saving.value = false
+  }
+}
+
+async function toggleRole(user) {
+  const newRoleVal = user.role === 'admin' ? 'user' : 'admin'
+  const label = newRoleVal === 'admin' ? '管理员' : '普通用户'
+  if (!confirm(`确定将用户 ${user.name || user.mobile} 的角色更改为「${label}」？`)) return
+
+  try {
+    await api.updateUserRole(user.mobile, newRoleVal)
+    await loadUsers()
+  } catch (e) {
+    error.value = e.response?.data?.detail || '更新角色失败'
   }
 }
 
@@ -91,9 +111,15 @@ onMounted(loadUsers)
           v-model="newName"
           type="text"
           placeholder="姓名（选填）"
-          class="flex-1 sm:max-w-[200px] px-3 py-2 text-sm border border-border-default rounded-lg focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent"
+          class="flex-1 sm:max-w-[160px] px-3 py-2 text-sm border border-border-default rounded-lg focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent"
           @keydown.enter="addUser"
         />
+        <select
+          v-model="newRole"
+          class="sm:max-w-[130px] px-3 py-2 text-sm border border-border-default rounded-lg focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent bg-white"
+        >
+          <option v-for="opt in roleOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+        </select>
         <button
           class="flex items-center justify-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-accent rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
           :disabled="saving"
@@ -144,6 +170,7 @@ onMounted(loadUsers)
             <tr class="bg-surface">
               <th class="px-4 sm:px-6 py-3 text-left text-xs font-medium text-text-secondary uppercase">手机号</th>
               <th class="px-4 sm:px-6 py-3 text-left text-xs font-medium text-text-secondary uppercase">姓名</th>
+              <th class="px-4 sm:px-6 py-3 text-left text-xs font-medium text-text-secondary uppercase">角色</th>
               <th class="px-4 sm:px-6 py-3 text-left text-xs font-medium text-text-secondary uppercase">钉钉ID</th>
               <th class="px-4 sm:px-6 py-3 text-left text-xs font-medium text-text-secondary uppercase">添加时间</th>
               <th class="px-4 sm:px-6 py-3 text-right text-xs font-medium text-text-secondary uppercase">操作</th>
@@ -157,9 +184,22 @@ onMounted(loadUsers)
             >
               <td class="px-4 sm:px-6 py-3 font-medium text-text-primary">
                 {{ user.mobile }}
-                <span v-if="user.isAdmin" class="ml-2 text-[10px] px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded font-medium">管理员</span>
               </td>
               <td class="px-4 sm:px-6 py-3 text-text-secondary">{{ user.name || '-' }}</td>
+              <td class="px-4 sm:px-6 py-3">
+                <button
+                  class="inline-flex items-center gap-1 px-2 py-1 text-xs rounded font-medium transition-colors"
+                  :class="user.isAdmin
+                    ? 'bg-amber-100 text-amber-700 hover:bg-amber-200'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'"
+                  @click="toggleRole(user)"
+                  :title="user.isAdmin ? '点击切换为普通用户' : '点击切换为管理员'"
+                >
+                  <ShieldCheck v-if="user.isAdmin" :size="12" />
+                  <Shield v-else :size="12" />
+                  {{ user.isAdmin ? '管理员' : '普通用户' }}
+                </button>
+              </td>
               <td class="px-4 sm:px-6 py-3 text-text-tertiary text-xs font-mono">{{ user.userid || '-' }}</td>
               <td class="px-4 sm:px-6 py-3 text-text-tertiary text-xs">
                 {{ user.created_at ? new Date(user.created_at).toLocaleString('zh-CN') : '-' }}

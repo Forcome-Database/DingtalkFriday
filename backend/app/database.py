@@ -45,6 +45,7 @@ async def _migrate_columns() -> None:
     """Add missing columns to existing tables (simple ALTER TABLE migration)."""
     migrations = [
         ("employee", "mobile", "VARCHAR"),
+        ("allowed_user", "role", "VARCHAR DEFAULT 'user'"),
     ]
     async with engine.begin() as conn:
         for table, column, col_type in migrations:

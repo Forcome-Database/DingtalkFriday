@@ -98,7 +98,10 @@ async def get_vacation_record_list(
         record_num_per_day, record_num_per_hour,
         leave_view_unit, leave_status, cal_type
     }
-    Only returns records with leave_status='success' and cal_type=null (actual leave).
+    Only returns records with leave_status='success'.
+    Records include both normal consumption (cal_type=null) and
+    reversals (cal_type!=null, e.g. when approval is revoked).
+    Callers should use cal_type to detect reversed/cancelled leaves.
     """
     records: List[Dict[str, Any]] = []
     current_offset = offset
@@ -119,10 +122,7 @@ async def get_vacation_record_list(
         leave_records = result.get("leave_records", [])
 
         for item in leave_records:
-            # Only keep actual leave records (cal_type=null means leave consumption)
             if item.get("leave_status") != "success":
-                continue
-            if item.get("cal_type") is not None:
                 continue
             records.append({
                 "userid": item.get("userid"),
@@ -133,6 +133,7 @@ async def get_vacation_record_list(
                 "record_num_per_hour": item.get("record_num_per_hour"),
                 "leave_view_unit": item.get("leave_view_unit"),
                 "leave_status": item.get("leave_status"),
+                "cal_type": item.get("cal_type"),
             })
 
         has_more = result.get("has_more", False)

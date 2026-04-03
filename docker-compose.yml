@@ -12,6 +12,8 @@ services:
       - ./backend/data:/app/data
     env_file:
       - ./.env
+    environment:
+      - TZ=Asia/Shanghai
     restart: unless-stopped
 
   frontend:

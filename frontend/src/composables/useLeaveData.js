@@ -251,6 +251,7 @@ export function useLeaveData() {
   const todayLeaveVisible = ref(false)
   const todayLeaveDetail = ref(null)
   const todayLeaveLoading = ref(false)
+  const todayLeaveDate = ref(new Date().toISOString().slice(0, 10))
 
   // --- Sync state ---
   const syncing = ref(false)
@@ -502,24 +503,30 @@ export function useLeaveData() {
   }
 
   /**
-   * Fetch today's leave detail for the modal
+   * Fetch leave detail for the modal (supports any date)
    */
-  async function fetchTodayLeaveDetail() {
+  async function fetchTodayLeaveDetail(date) {
     if (todayLeaveLoading.value) return
     todayLeaveLoading.value = true
     todayLeaveVisible.value = true
+
+    if (date) {
+      todayLeaveDate.value = date
+    }
 
     try {
       const effectiveDeptId = filters.deptId2 || filters.deptId
       const params = {
         deptId: effectiveDeptId,
         leaveTypes: filters.leaveTypes,
-        employeeName: filters.employeeName
+        employeeName: filters.employeeName,
+        date: todayLeaveDate.value
       }
 
       if (USE_MOCK) {
         await new Promise(resolve => setTimeout(resolve, 300))
         todayLeaveDetail.value = {
+          date: todayLeaveDate.value,
           count: 3,
           records: [
             { userid: 'U001', name: '张三', avatar: '', deptName: '研发部', leaveType: '年假', leaveCode: 'annual', startTime: 0, endTime: 0, durationPercent: 800, durationUnit: 'percent_hour', durationDisplay: '8小时', timeDisplay: '09:00 - 18:00', status: '已审批' },
@@ -531,10 +538,30 @@ export function useLeaveData() {
         todayLeaveDetail.value = await api.getTodayLeaveDetail(params)
       }
     } catch (e) {
-      console.error('Failed to fetch today leave detail:', e)
+      console.error('Failed to fetch leave detail:', e)
       todayLeaveDetail.value = null
     } finally {
       todayLeaveLoading.value = false
+    }
+  }
+
+  /**
+   * Export current leave detail as Excel
+   */
+  async function exportLeaveDetail() {
+    try {
+      const effectiveDeptId = filters.deptId2 || filters.deptId
+      const params = {
+        deptId: effectiveDeptId,
+        leaveTypes: filters.leaveTypes,
+        employeeName: filters.employeeName,
+        date: todayLeaveDate.value
+      }
+      const blob = await api.exportLeaveDetail(params)
+      const { saveAs } = await import('file-saver')
+      saveAs(blob, `请假详情_${todayLeaveDate.value}.xlsx`)
+    } catch (e) {
+      console.error('Export leave detail failed:', e)
     }
   }
 
@@ -544,6 +571,7 @@ export function useLeaveData() {
   function closeTodayLeave() {
     todayLeaveVisible.value = false
     todayLeaveDetail.value = null
+    todayLeaveDate.value = new Date().toISOString().slice(0, 10)
   }
 
   /**
@@ -752,6 +780,7 @@ export function useLeaveData() {
     todayLeaveVisible,
     todayLeaveDetail,
     todayLeaveLoading,
+    todayLeaveDate,
     syncing,
     syncMessage,
     yearOptions,
@@ -774,6 +803,7 @@ export function useLeaveData() {
     triggerSync,
     exportExcel,
     fetchTodayLeaveDetail,
+    exportLeaveDetail,
     closeTodayLeave
   }
 }

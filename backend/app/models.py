@@ -125,6 +125,7 @@ class AllowedUser(Base):
     mobile = Column(String, unique=True, nullable=False, comment="Phone number")
     name = Column(String, nullable=True, comment="Display name")
     userid = Column(String, nullable=True, comment="DingTalk user ID (filled on login)")
+    role = Column(String, nullable=False, default="user", comment="Role: admin or user")
     created_at = Column(DateTime, default=datetime.utcnow, comment="Creation time")
 
 

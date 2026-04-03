@@ -335,6 +335,35 @@ async def sync_leave_records(year: int) -> str:
         year_end_ms = int(datetime(year, 12, 31, 23, 59, 59).timestamp() * 1000)
         count = 0
 
+        # Build a whitelist of genuinely active leaves using getleavestatus.
+        # This API only returns leaves that are currently approved/active,
+        # unlike vacation/record/list which may still show revoked leaves
+        # with leave_status=success.
+        active_leaves: set = set()
+        time_chunks = _year_time_chunks(year)
+        for i in range(0, len(all_userids), 100):
+            batch_100 = all_userids[i : i + 100]
+            for chunk_start, chunk_end in time_chunks:
+                try:
+                    leave_recs = await att_api.get_leave_status(
+                        userid_list=batch_100,
+                        start_time=chunk_start,
+                        end_time=chunk_end,
+                    )
+                    for lr in leave_recs:
+                        uid = lr.get("userid")
+                        st = lr.get("start_time")
+                        et = lr.get("end_time")
+                        if uid and st and et:
+                            active_leaves.add((uid, st, et))
+                except Exception as e:
+                    logger.warning("Failed to fetch leave status: %s", e)
+
+        logger.info(
+            "Built active leave whitelist: %d entries for %d users",
+            len(active_leaves), len(all_userids),
+        )
+
         # Clear old records for this year before re-syncing
         async with async_session() as session:
             await session.execute(
@@ -371,13 +400,39 @@ async def sync_leave_records(year: int) -> str:
                     )
                     continue
 
+                # Separate normal consumption (cal_type=null) from
+                # reversals (cal_type!=null, e.g. approval revoked).
+                # Build a set of reversed keys so we can skip them.
+                reversed_keys: set = set()
                 for rec in records:
+                    if rec.get("cal_type") is not None:
+                        st = rec.get("start_time")
+                        et = rec.get("end_time")
+                        if st and et:
+                            reversed_keys.add((rec["userid"], st, et))
+
+                for rec in records:
+                    if rec.get("cal_type") is not None:
+                        continue
+
                     st = rec.get("start_time")
                     et = rec.get("end_time")
                     if not st or not et:
                         continue
                     # Filter to target year
                     if st < year_start_ms or st > year_end_ms:
+                        continue
+
+                    # Skip records that have been reversed (leave revoked)
+                    if (rec["userid"], st, et) in reversed_keys:
+                        continue
+
+                    # Skip records not confirmed by getleavestatus
+                    if active_leaves and (rec["userid"], st, et) not in active_leaves:
+                        logger.debug(
+                            "Skipping unconfirmed leave: user=%s, %d-%d",
+                            rec["userid"], st, et,
+                        )
                         continue
 
                     # Convert record_num to duration_percent / duration_unit

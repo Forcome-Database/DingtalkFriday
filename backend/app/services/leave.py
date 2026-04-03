@@ -651,19 +651,21 @@ async def get_today_leave_detail(
     dept_id: Optional[int] = None,
     leave_types: Optional[List[str]] = None,
     employee_name: Optional[str] = None,
+    target_date: Optional[date_type] = None,
 ) -> dict:
     """
-    Get detailed leave records for today.
+    Get detailed leave records for a specific date (defaults to today).
 
     Returns a dict matching TodayLeaveDetailResponse schema:
     {
-        count: int  -- distinct person count on leave today,
+        date: str   -- the queried date (YYYY-MM-DD),
+        count: int  -- distinct person count on leave,
         records: [{ userid, name, avatar, deptName, leaveType, leaveCode,
                      startTime, endTime, durationPercent, durationUnit,
                      durationDisplay, timeDisplay, status }],
     }
     """
-    today = date_type.today()
+    today = target_date or date_type.today()
     today_start_ms = int(datetime(today.year, today.month, today.day, 0, 0, 0).timestamp() * 1000)
     today_end_ms = int(datetime(today.year, today.month, today.day, 23, 59, 59).timestamp() * 1000)
 
@@ -776,6 +778,7 @@ async def get_today_leave_detail(
     result_records.sort(key=lambda r: r["name"])
 
     return {
+        "date": today.isoformat(),
         "count": len(person_ids),
         "records": result_records,
     }

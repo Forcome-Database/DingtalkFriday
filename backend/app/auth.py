@@ -8,6 +8,7 @@ from typing import Any, Dict, Optional
 
 import jwt
 from fastapi import Depends, HTTPException, Request, status
+from sqlalchemy import select
 
 from app.config import settings
 
@@ -19,6 +20,20 @@ def _get_admin_phones() -> list[str]:
     if not settings.admin_phones:
         return []
     return [p.strip() for p in settings.admin_phones.split(",") if p.strip()]
+
+
+async def is_admin_user(mobile: str) -> bool:
+    """Check if a user is admin by ADMIN_PHONES config or DB role."""
+    if mobile in _get_admin_phones():
+        return True
+    from app.database import async_session
+    from app.models import AllowedUser
+    async with async_session() as session:
+        result = await session.execute(
+            select(AllowedUser.role).where(AllowedUser.mobile == mobile)
+        )
+        role = result.scalar_one_or_none()
+        return role == "admin"
 
 
 def create_token(userid: str, name: str, mobile: str) -> str:
@@ -70,10 +85,10 @@ async def require_admin(
 ) -> Dict[str, Any]:
     """
     FastAPI dependency: require the current user to be an admin.
-    Admin is determined by checking if user's mobile is in ADMIN_PHONES.
+    Admin is determined by ADMIN_PHONES config or DB role='admin'.
     """
-    admin_phones = _get_admin_phones()
-    if user.get("mobile") not in admin_phones:
+    mobile = user.get("mobile", "")
+    if not await is_admin_user(mobile):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required",

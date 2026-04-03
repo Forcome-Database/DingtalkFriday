@@ -82,10 +82,19 @@ export default {
 
   /**
    * Add an allowed user (admin only)
-   * @param {{ mobile: string, name?: string }} data
+   * @param {{ mobile: string, name?: string, role?: string }} data
    */
   addUser(data) {
     return api.post('/admin/users', data)
+  },
+
+  /**
+   * Update an allowed user's role (admin only)
+   * @param {string} mobile
+   * @param {string} role - 'admin' or 'user'
+   */
+  updateUserRole(mobile, role) {
+    return api.patch(`/admin/users/${mobile}/role`, { role })
   },
 
   /**
@@ -159,15 +168,31 @@ export default {
   },
 
   /**
-   * Get today's leave detail (list of employees on leave with time info)
+   * Get leave detail for a specific date (defaults to today)
    */
   getTodayLeaveDetail(params) {
     return api.get('/leave/today-detail', {
       params: {
         deptId: params.deptId || undefined,
         leaveTypes: params.leaveTypes?.length ? params.leaveTypes.join(',') : undefined,
-        employeeName: params.employeeName || undefined
+        employeeName: params.employeeName || undefined,
+        date: params.date || undefined
       }
+    })
+  },
+
+  /**
+   * Export leave detail for a specific date as Excel
+   */
+  exportLeaveDetail(params) {
+    return api.get('/leave/today-detail/export', {
+      params: {
+        deptId: params.deptId || undefined,
+        leaveTypes: params.leaveTypes?.length ? params.leaveTypes.join(',') : undefined,
+        employeeName: params.employeeName || undefined,
+        date: params.date || undefined
+      },
+      responseType: 'blob'
     })
   },
 
@@ -252,7 +277,7 @@ export default {
   },
 
   /**
-   * Get today's trip/outing list
+   * Get trip/outing list for a specific date (defaults to today)
    */
   getTripToday(params = {}) {
     return api.get('/trip/today', {
@@ -260,7 +285,23 @@ export default {
         deptId: params.deptId || undefined,
         tripType: params.tripType || undefined,
         employeeName: params.employeeName || undefined,
+        date: params.date || undefined,
       }
+    })
+  },
+
+  /**
+   * Export trip detail for a specific date as Excel
+   */
+  exportTripDetail(params = {}) {
+    return api.get('/trip/today/export', {
+      params: {
+        deptId: params.deptId || undefined,
+        tripType: params.tripType || undefined,
+        employeeName: params.employeeName || undefined,
+        date: params.date || undefined,
+      },
+      responseType: 'blob'
     })
   },
 
