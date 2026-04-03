@@ -247,6 +247,28 @@ export default {
     return api.get('/analytics/employee-ranking', { params: { year, limit } })
   },
 
+  // --- Trip Analytics API ---
+
+  getTripMonthlyTrend(year) {
+    return api.get('/analytics/trip/monthly-trend', { params: { year } })
+  },
+
+  getTripTypeDistribution(year) {
+    return api.get('/analytics/trip/type-distribution', { params: { year } })
+  },
+
+  getTripDepartmentComparison(year, metric = 'total') {
+    return api.get('/analytics/trip/department-comparison', { params: { year, metric } })
+  },
+
+  getTripWeekdayDistribution(year) {
+    return api.get('/analytics/trip/weekday-distribution', { params: { year } })
+  },
+
+  getTripEmployeeRanking(year, limit = 10) {
+    return api.get('/analytics/trip/employee-ranking', { params: { year, limit } })
+  },
+
   // --- Trip (business trip / out-of-office) API ---
 
   /**
