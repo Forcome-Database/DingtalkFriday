@@ -459,12 +459,16 @@ async def get_daily_detail(
                 continue
 
             if current == rec_start_date:
-                start_time_str = start_dt.strftime("%H:%M")
+                # Cap to 09:00 in case DingTalk stores a pre-work sentinel time
+                capped_start = max(start_dt, start_dt.replace(hour=9, minute=0, second=0, microsecond=0))
+                start_time_str = capped_start.strftime("%H:%M")
             else:
                 start_time_str = "09:00"
 
             if current == rec_end_date:
-                end_time_str = end_dt.strftime("%H:%M")
+                # Cap to 18:00 in case DingTalk stores a post-work sentinel time
+                capped_end = min(end_dt, end_dt.replace(hour=18, minute=0, second=0, microsecond=0))
+                end_time_str = capped_end.strftime("%H:%M")
             else:
                 end_time_str = "18:00"
 
@@ -476,10 +480,11 @@ async def get_daily_detail(
                 day_hours = 8.0
             else:
                 # 跨天记录：按当天时段计算，扣除午休
-                eff_s = start_dt.hour + start_dt.minute / 60.0 if current == rec_start_date else 9.0
-                eff_e = end_dt.hour + end_dt.minute / 60.0 if current == rec_end_date else 18.0
+                # Cap to working hours window to handle DingTalk sentinel times (e.g. 00:00, 21:51)
+                eff_s = max(start_dt.hour + start_dt.minute / 60.0, 9.0) if current == rec_start_date else 9.0
+                eff_e = min(end_dt.hour + end_dt.minute / 60.0, 18.0) if current == rec_end_date else 18.0
                 lunch = max(0.0, min(eff_e, 13.0) - max(eff_s, 12.0))
-                day_hours = eff_e - eff_s - lunch
+                day_hours = max(0.0, eff_e - eff_s - lunch)
 
             detail_records.append({
                 "date": current.isoformat(),
@@ -731,9 +736,13 @@ async def get_today_leave_detail(
         if rec_start_date == rec_end_date:
             time_display = f"{start_dt.strftime('%H:%M')} - {end_dt.strftime('%H:%M')}"
         elif rec_start_date == today:
-            time_display = f"{start_dt.strftime('%H:%M')} - 18:00"
+            # Cap start to 09:00 in case DingTalk stores a pre-work sentinel time
+            capped_start = max(start_dt, start_dt.replace(hour=9, minute=0, second=0, microsecond=0))
+            time_display = f"{capped_start.strftime('%H:%M')} - 18:00"
         elif rec_end_date == today:
-            time_display = f"09:00 - {end_dt.strftime('%H:%M')}"
+            # Cap end to 18:00 in case DingTalk stores a post-work sentinel time
+            capped_end = min(end_dt, end_dt.replace(hour=18, minute=0, second=0, microsecond=0))
+            time_display = f"09:00 - {capped_end.strftime('%H:%M')}"
         else:
             time_display = "09:00 - 18:00"
 
@@ -746,12 +755,13 @@ async def get_today_leave_detail(
             today_hours = _convert_duration(rec.duration_percent, rec.duration_unit, "hour", hpd)
         else:
             # Cross-day: calculate from effective today time range, deduct lunch overlap
-            eff_start_h = start_dt.hour + start_dt.minute / 60.0 if rec_start_date == today else 9.0
-            eff_end_h = end_dt.hour + end_dt.minute / 60.0 if rec_end_date == today else 18.0
+            # Cap to working hours window to handle DingTalk sentinel times (e.g. 00:00, 21:51)
+            eff_start_h = max(start_dt.hour + start_dt.minute / 60.0, 9.0) if rec_start_date == today else 9.0
+            eff_end_h = min(end_dt.hour + end_dt.minute / 60.0, 18.0) if rec_end_date == today else 18.0
             raw_hours = eff_end_h - eff_start_h
             # Deduct overlap with 12:00-13:00 lunch break
             lunch_deduct = max(0.0, min(eff_end_h, 13.0) - max(eff_start_h, 12.0))
-            today_hours = raw_hours - lunch_deduct
+            today_hours = max(0.0, raw_hours - lunch_deduct)
 
         today_hours = round(today_hours, 1)
         if today_hours == int(today_hours):
