@@ -459,16 +459,12 @@ async def get_daily_detail(
                 continue
 
             if current == rec_start_date:
-                # Cap to 09:00 in case DingTalk stores a pre-work sentinel time
-                capped_start = max(start_dt, start_dt.replace(hour=9, minute=0, second=0, microsecond=0))
-                start_time_str = capped_start.strftime("%H:%M")
+                start_time_str = start_dt.strftime("%H:%M")
             else:
                 start_time_str = "09:00"
 
             if current == rec_end_date:
-                # Cap to 18:00 in case DingTalk stores a post-work sentinel time
-                capped_end = min(end_dt, end_dt.replace(hour=18, minute=0, second=0, microsecond=0))
-                end_time_str = capped_end.strftime("%H:%M")
+                end_time_str = end_dt.strftime("%H:%M")
             else:
                 end_time_str = "18:00"
 
@@ -736,13 +732,9 @@ async def get_today_leave_detail(
         if rec_start_date == rec_end_date:
             time_display = f"{start_dt.strftime('%H:%M')} - {end_dt.strftime('%H:%M')}"
         elif rec_start_date == today:
-            # Cap start to 09:00 in case DingTalk stores a pre-work sentinel time
-            capped_start = max(start_dt, start_dt.replace(hour=9, minute=0, second=0, microsecond=0))
-            time_display = f"{capped_start.strftime('%H:%M')} - 18:00"
+            time_display = f"{start_dt.strftime('%H:%M')} - 18:00"
         elif rec_end_date == today:
-            # Cap end to 18:00 in case DingTalk stores a post-work sentinel time
-            capped_end = min(end_dt, end_dt.replace(hour=18, minute=0, second=0, microsecond=0))
-            time_display = f"09:00 - {capped_end.strftime('%H:%M')}"
+            time_display = f"09:00 - {end_dt.strftime('%H:%M')}"
         else:
             time_display = "09:00 - 18:00"
 
