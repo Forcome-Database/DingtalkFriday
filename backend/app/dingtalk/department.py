@@ -10,6 +10,26 @@ from app.dingtalk.client import dingtalk_client
 logger = logging.getLogger(__name__)
 
 
+async def get_department(dept_id: int) -> Dict[str, Any]:
+    """
+    Get department detail by ID.
+
+    POST /topapi/v2/department/get
+    Body: { dept_id, language: "zh_CN" }
+    Returns: { dept_id, name, parent_id, ... }
+    """
+    data = await dingtalk_client.post(
+        "/topapi/v2/department/get",
+        json_body={"dept_id": dept_id, "language": "zh_CN"},
+    )
+    result = data.get("result", {})
+    return {
+        "dept_id": result.get("dept_id"),
+        "name": result.get("name", ""),
+        "parent_id": result.get("parent_id", 0),
+    }
+
+
 async def get_sub_departments(dept_id: int = 1) -> List[Dict[str, Any]]:
     """
     Get sub-department list for the given parent department.

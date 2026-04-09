@@ -64,6 +64,27 @@ async def sync_departments() -> str:
     log_id = await _create_sync_log("department")
     try:
         count = 0
+
+        # Store the root department itself (BFS only stores children)
+        root_info = await dept_api.get_department(settings.root_dept_id)
+        async with async_session() as session:
+            stmt = sqlite_insert(Department).values(
+                dept_id=root_info["dept_id"],
+                name=root_info["name"],
+                parent_id=root_info["parent_id"],
+                updated_at=datetime.now(timezone.utc),
+            ).on_conflict_do_update(
+                index_elements=["dept_id"],
+                set_={
+                    "name": root_info["name"],
+                    "parent_id": root_info["parent_id"],
+                    "updated_at": datetime.now(timezone.utc),
+                },
+            )
+            await session.execute(stmt)
+            await session.commit()
+        count += 1
+
         # BFS traversal of department tree
         queue: List[int] = [settings.root_dept_id]
         visited: set = set()
