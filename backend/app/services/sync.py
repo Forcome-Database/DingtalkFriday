@@ -127,9 +127,11 @@ async def sync_employees(dept_id: Optional[int] = None) -> str:
                 result = await session.execute(select(Department.dept_id))
                 dept_ids = [row[0] for row in result.fetchall()]
 
-        if not dept_ids:
-            # Fallback: if no departments in DB, fetch root sub-departments
-            dept_ids = [settings.root_dept_id]
+            # Always include root_dept_id so users placed directly
+            # under the root department (not in any sub-department)
+            # are not missed.
+            if settings.root_dept_id not in dept_ids:
+                dept_ids.insert(0, settings.root_dept_id)
 
         for did in dept_ids:
             users = await user_api.get_user_list_simple(did)
