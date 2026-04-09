@@ -119,19 +119,27 @@ async def _sync_one(userid: str, work_date_str: str, semaphore: asyncio.Semaphor
 
     Returns count of records upserted. Uses a delete-then-insert strategy
     to ensure stale approvals (e.g., revoked trips) are removed.
+    Skips deletion when the API returns empty data (unsettled date)
+    to avoid wiping valid records.
     """
     async with semaphore:
         await asyncio.sleep(0.05)  # 50ms throttle to avoid API rate limits
 
         data = await get_update_data(userid, work_date_str)
-        approve_list = data.get("approve_list", [])
+
+        # If the API returned an empty result, attendance for this date
+        # has not been calculated yet — preserve existing records.
+        if not data:
+            return 0
+
+        approve_list = data.get("approve_list") or []
 
         # Filter biz_type=2 (trip/outing)
         trip_items = [a for a in approve_list if a.get("biz_type") == 2]
 
         now = datetime.now(timezone.utc)
 
-        # Delete existing records for this userid + work_date, then insert fresh
+        # API returned valid attendance data — safe to delete-then-insert
         async with async_session() as session:
             await session.execute(
                 delete(TripRecord).where(
