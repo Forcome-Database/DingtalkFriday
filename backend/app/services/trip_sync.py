@@ -223,6 +223,21 @@ async def sync_trip_records(force_month: Optional[str] = None) -> str:
             await _finish_sync_log(log_id, "failed", msg)
             return msg
 
+        # Detect new employees (no cursor records at all) for backfill
+        new_userids: set = set()
+        if not force_month:
+            async with async_session() as session:
+                result = await session.execute(
+                    select(TripSyncCursor.userid).distinct()
+                )
+                known_userids = {row[0] for row in result.fetchall()}
+            new_userids = set(all_userids) - known_userids
+            if new_userids:
+                logger.info(
+                    "Detected %d new employees for full-year backfill",
+                    len(new_userids),
+                )
+
         # Build date list based on sync mode
         if force_month:
             dates = _build_force_month_dates(force_month)
@@ -246,6 +261,25 @@ async def sync_trip_records(force_month: Optional[str] = None) -> str:
             )
             zone = "hot"  # Default zone; overridden per-date below
 
+        # Build full-year date list for new employee backfill
+        backfill_dates: set = set()
+        if new_userids and not force_month:
+            year_start = date(date.today().year, 1, 1)
+            year_end = min(
+                date(date.today().year, 12, 31),
+                date.today() + timedelta(days=settings.trip_hot_days_future),
+            )
+            d = year_start
+            while d <= year_end:
+                backfill_dates.add(d)
+                d += timedelta(days=1)
+            # Remove dates already in the normal sync list
+            backfill_dates -= set(dates)
+            logger.info(
+                "Backfill: %d extra dates for %d new employees",
+                len(backfill_dates), len(new_userids),
+            )
+
         today = date.today()
         hot_start = today - timedelta(days=settings.trip_hot_days_past)
         hot_end = today + timedelta(days=settings.trip_hot_days_future)
@@ -253,8 +287,10 @@ async def sync_trip_records(force_month: Optional[str] = None) -> str:
         semaphore = asyncio.Semaphore(settings.trip_sync_concurrency)
         total_records = 0
         total_skipped = 0
+        total_backfill = 0
         consecutive_failures = 0
 
+        # --- Phase 1: Normal sync for all employees ---
         for d in dates:
             work_date_str = d.isoformat()
 
@@ -304,6 +340,42 @@ async def sync_trip_records(force_month: Optional[str] = None) -> str:
                     *[_sync_with_retry(uid, wds) for uid, wds in batch]
                 )
 
+        # --- Phase 2: Backfill new employees for dates outside normal range ---
+        if backfill_dates and consecutive_failures < settings.trip_sync_fail_threshold:
+            sorted_backfill = sorted(backfill_dates)
+            for d in sorted_backfill:
+                if consecutive_failures >= settings.trip_sync_fail_threshold:
+                    break
+                work_date_str = d.isoformat()
+                tasks = [(uid, work_date_str) for uid in new_userids]
+
+                for batch_start in range(0, len(tasks), batch_size):
+                    batch = tasks[batch_start: batch_start + batch_size]
+
+                    async def _backfill_with_retry(uid, wds):
+                        nonlocal total_backfill, consecutive_failures
+                        for attempt in range(settings.trip_sync_retry_count + 1):
+                            try:
+                                count = await _sync_one(uid, wds, semaphore)
+                                total_backfill += count
+                                consecutive_failures = 0
+                                return
+                            except Exception as e:
+                                if attempt >= settings.trip_sync_retry_count:
+                                    consecutive_failures += 1
+                                    logger.warning(
+                                        "Backfill failed for %s on %s: %s",
+                                        uid, wds, e,
+                                    )
+                                    return
+                                await asyncio.sleep(2 ** attempt)
+
+                    await asyncio.gather(
+                        *[_backfill_with_retry(uid, wds) for uid, wds in batch]
+                    )
+
+            logger.info("Backfill done: %d records for new employees", total_backfill)
+
         # Cleanup stale cursors older than 1 year to keep the table lean
         cutoff = datetime.now(timezone.utc) - timedelta(days=365)
         async with async_session() as session:
@@ -312,10 +384,13 @@ async def sync_trip_records(force_month: Optional[str] = None) -> str:
             )
             await session.commit()
 
+        backfill_info = ""
+        if total_backfill > 0:
+            backfill_info = f", {total_backfill} backfill records for {len(new_userids)} new employees"
         msg = (
             f"Trip sync done: {total_records} records across "
             f"{len(all_userids)} employees, {len(dates)} dates, "
-            f"{total_skipped} skipped"
+            f"{total_skipped} skipped{backfill_info}"
         )
         await _finish_sync_log(log_id, "success", msg)
         logger.info(msg)

@@ -50,8 +50,8 @@ class Settings(BaseSettings):
     # Trip (business trip / out-of-office) sync settings
     trip_sync_enabled: bool = True
     trip_sync_cron: str = "30 2 * * *"
-    trip_hot_days_past: int = 3
-    trip_hot_days_future: int = 7
+    trip_hot_days_past: int = 60
+    trip_hot_days_future: int = 30
     trip_warm_days_future: int = 90
     trip_sync_concurrency: int = 10
     trip_sync_retry_count: int = 3
