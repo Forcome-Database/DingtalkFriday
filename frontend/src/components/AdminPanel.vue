@@ -1,6 +1,6 @@
 <script setup>
-import { onMounted, ref } from 'vue'
-import { UserPlus, Trash2, Loader2, AlertCircle, Users, Shield, ShieldCheck } from 'lucide-vue-next'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
+import { UserPlus, Trash2, Loader2, AlertCircle, Users, Shield, ShieldCheck, Pencil, X } from 'lucide-vue-next'
 import api from '../api/index.js'
 
 const users = ref([])
@@ -13,6 +13,14 @@ const newMobile = ref('')
 const newName = ref('')
 const newRole = ref('user')
 const formError = ref('')
+
+// Edit modal state
+const editVisible = ref(false)
+const editMobile = ref('')
+const editName = ref('')
+const editRole = ref('user')
+const editSaving = ref(false)
+const editError = ref('')
 
 const roleOptions = [
   { value: 'user', label: '普通用户' },
@@ -57,16 +65,32 @@ async function addUser() {
   }
 }
 
-async function toggleRole(user) {
-  const newRoleVal = user.role === 'admin' ? 'user' : 'admin'
-  const label = newRoleVal === 'admin' ? '管理员' : '普通用户'
-  if (!confirm(`确定将用户 ${user.name || user.mobile} 的角色更改为「${label}」？`)) return
+function openEdit(user) {
+  editMobile.value = user.mobile
+  editName.value = user.name || ''
+  editRole.value = user.role || 'user'
+  editError.value = ''
+  editVisible.value = true
+}
 
+function closeEdit() {
+  editVisible.value = false
+}
+
+async function saveEdit() {
+  editSaving.value = true
+  editError.value = ''
   try {
-    await api.updateUserRole(user.mobile, newRoleVal)
+    await api.updateUser(editMobile.value, {
+      name: editName.value.trim() || null,
+      role: editRole.value,
+    })
+    editVisible.value = false
     await loadUsers()
   } catch (e) {
-    error.value = e.response?.data?.detail || '更新角色失败'
+    editError.value = e.response?.data?.detail || '保存失败'
+  } finally {
+    editSaving.value = false
   }
 }
 
@@ -80,6 +104,16 @@ async function removeUser(mobile) {
     error.value = e.response?.data?.detail || '移除用户失败'
   }
 }
+
+// Close edit modal on Escape key
+function onEscKey(e) {
+  if (e.key === 'Escape' && editVisible.value) closeEdit()
+}
+watch(editVisible, (visible) => {
+  if (visible) window.addEventListener('keydown', onEscKey)
+  else window.removeEventListener('keydown', onEscKey)
+})
+onUnmounted(() => window.removeEventListener('keydown', onEscKey))
 
 onMounted(loadUsers)
 </script>
@@ -187,24 +221,29 @@ onMounted(loadUsers)
               </td>
               <td class="px-4 sm:px-6 py-3 text-text-secondary">{{ user.name || '-' }}</td>
               <td class="px-4 sm:px-6 py-3">
-                <button
-                  class="inline-flex items-center gap-1 px-2 py-1 text-xs rounded font-medium transition-colors"
+                <span
+                  class="inline-flex items-center gap-1 px-2 py-1 text-xs rounded font-medium"
                   :class="user.isAdmin
-                    ? 'bg-amber-100 text-amber-700 hover:bg-amber-200'
-                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'"
-                  @click="toggleRole(user)"
-                  :title="user.isAdmin ? '点击切换为普通用户' : '点击切换为管理员'"
+                    ? 'bg-amber-100 text-amber-700'
+                    : 'bg-gray-100 text-gray-600'"
                 >
                   <ShieldCheck v-if="user.isAdmin" :size="12" />
                   <Shield v-else :size="12" />
                   {{ user.isAdmin ? '管理员' : '普通用户' }}
-                </button>
+                </span>
               </td>
               <td class="px-4 sm:px-6 py-3 text-text-tertiary text-xs font-mono">{{ user.userid || '-' }}</td>
               <td class="px-4 sm:px-6 py-3 text-text-tertiary text-xs">
                 {{ user.created_at ? new Date(user.created_at).toLocaleString('zh-CN') : '-' }}
               </td>
-              <td class="px-4 sm:px-6 py-3 text-right">
+              <td class="px-4 sm:px-6 py-3 text-right space-x-1">
+                <button
+                  class="inline-flex items-center gap-1 px-2 py-1 text-xs text-accent hover:bg-blue-50 rounded transition-colors"
+                  @click="openEdit(user)"
+                >
+                  <Pencil :size="12" />
+                  编辑
+                </button>
                 <button
                   class="inline-flex items-center gap-1 px-2 py-1 text-xs text-red-600 hover:bg-red-50 rounded transition-colors"
                   @click="removeUser(user.mobile)"
@@ -218,5 +257,79 @@ onMounted(loadUsers)
         </table>
       </div>
     </div>
+
+    <!-- Edit user modal -->
+    <Teleport to="body">
+      <div v-if="editVisible" class="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <!-- Backdrop -->
+        <div class="absolute inset-0 bg-black/40" @click="closeEdit"></div>
+        <!-- Modal -->
+        <div class="relative bg-white rounded-xl shadow-xl border border-border-default w-full max-w-md p-6 space-y-5">
+          <div class="flex items-center justify-between">
+            <h3 class="text-lg font-semibold text-text-primary">编辑用户</h3>
+            <button class="p-1 rounded hover:bg-gray-100 text-text-tertiary" @click="closeEdit">
+              <X :size="18" />
+            </button>
+          </div>
+
+          <div class="space-y-4">
+            <!-- Mobile (read-only) -->
+            <div>
+              <label class="block text-xs font-medium text-text-secondary mb-1">手机号</label>
+              <input
+                :value="editMobile"
+                disabled
+                class="w-full px-3 py-2 text-sm border border-border-default rounded-lg bg-gray-50 text-text-tertiary cursor-not-allowed"
+              />
+            </div>
+            <!-- Name -->
+            <div>
+              <label class="block text-xs font-medium text-text-secondary mb-1">姓名</label>
+              <input
+                v-model="editName"
+                type="text"
+                placeholder="输入姓名"
+                class="w-full px-3 py-2 text-sm border border-border-default rounded-lg focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent"
+                @keydown.enter="saveEdit"
+              />
+            </div>
+            <!-- Role -->
+            <div>
+              <label class="block text-xs font-medium text-text-secondary mb-1">角色</label>
+              <select
+                v-model="editRole"
+                class="w-full px-3 py-2 text-sm border border-border-default rounded-lg focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent bg-white"
+              >
+                <option v-for="opt in roleOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Error -->
+          <div v-if="editError" class="flex items-center gap-1.5 text-red-600">
+            <AlertCircle :size="14" />
+            <span class="text-xs">{{ editError }}</span>
+          </div>
+
+          <!-- Actions -->
+          <div class="flex justify-end gap-3 pt-2">
+            <button
+              class="px-4 py-2 text-sm font-medium text-text-secondary border border-border-default rounded-lg hover:bg-gray-50 transition-colors"
+              @click="closeEdit"
+            >
+              取消
+            </button>
+            <button
+              class="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-accent rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+              :disabled="editSaving"
+              @click="saveEdit"
+            >
+              <Loader2 v-if="editSaving" class="animate-spin" :size="14" />
+              保存
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>

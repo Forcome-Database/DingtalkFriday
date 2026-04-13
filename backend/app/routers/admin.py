@@ -1,10 +1,10 @@
 """
 Admin API router - manage allowed users.
 
-GET    /api/admin/users               - List all allowed users
-POST   /api/admin/users               - Add a new allowed user
-PATCH  /api/admin/users/{mobile}/role  - Update user role
-DELETE /api/admin/users/{mobile}       - Remove an allowed user
+GET    /api/admin/users          - List all allowed users
+POST   /api/admin/users          - Add a new allowed user
+PUT    /api/admin/users/{mobile} - Update user name and/or role
+DELETE /api/admin/users/{mobile} - Remove an allowed user
 """
 
 import logging
@@ -14,11 +14,11 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 
-from app.auth import require_admin, _get_admin_phones
+from app.auth import require_admin, _get_admin_phones, invalidate_whitelist_cache
 from app.database import async_session
 from app.models import AllowedUser
 from app.schemas import (
-    AddUserRequest, AllowedUserOut, MessageResponse, UpdateUserRoleRequest,
+    AddUserRequest, AllowedUserOut, MessageResponse, UpdateUserRequest,
 )
 
 logger = logging.getLogger(__name__)
@@ -82,16 +82,22 @@ async def add_user(request: AddUserRequest, _admin=Depends(require_admin)):
         await session.commit()
         await session.refresh(user)
 
+    invalidate_whitelist_cache(request.mobile)
     admin_phones = _get_admin_phones()
     return _user_to_out(user, admin_phones)
 
 
-@router.patch("/users/{mobile}/role", response_model=AllowedUserOut)
-async def update_user_role(
-    mobile: str, request: UpdateUserRoleRequest, _admin=Depends(require_admin),
+@router.put("/users/{mobile}", response_model=AllowedUserOut)
+async def update_user(
+    mobile: str, request: UpdateUserRequest, _admin=Depends(require_admin),
 ):
-    """Update an allowed user's role."""
-    if request.role not in VALID_ROLES:
+    """Update an allowed user's name and/or role."""
+    if mobile == _admin.get("mobile") and request.role and request.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="不能降级自己的管理员权限",
+        )
+    if request.role is not None and request.role not in VALID_ROLES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid role: {request.role}. Must be one of {VALID_ROLES}",
@@ -107,11 +113,15 @@ async def update_user_role(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"User with mobile {mobile} not found",
             )
-        user.role = request.role
+        if request.name is not None:
+            user.name = request.name
+        if request.role is not None:
+            user.role = request.role
         session.add(user)
         await session.commit()
         await session.refresh(user)
 
+    invalidate_whitelist_cache(mobile)
     admin_phones = _get_admin_phones()
     return _user_to_out(user, admin_phones)
 
@@ -119,6 +129,11 @@ async def update_user_role(
 @router.delete("/users/{mobile}", response_model=MessageResponse)
 async def remove_user(mobile: str, _admin=Depends(require_admin)):
     """Remove an allowed user by phone number."""
+    if mobile == _admin.get("mobile"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="不能移除自己的访问权限",
+        )
     async with async_session() as session:
         result = await session.execute(
             select(AllowedUser).where(AllowedUser.mobile == mobile)
@@ -132,4 +147,5 @@ async def remove_user(mobile: str, _admin=Depends(require_admin)):
         await session.delete(user)
         await session.commit()
 
+    invalidate_whitelist_cache(mobile)
     return MessageResponse(message=f"User {mobile} removed", success=True)

@@ -23,11 +23,10 @@ api.interceptors.response.use(
   (response) => response.data,
   (error) => {
     const status = error.response?.status
-    if (status === 401) {
-      // Token expired or invalid, clear auth state and redirect
+    if (status === 401 || status === 403) {
+      // Token expired / invalid / access revoked — clear auth state and redirect
       removeToken()
       removeUser()
-      // Use location to force full page reload to login
       if (!window.location.pathname.startsWith('/login')) {
         window.location.href = '/login'
       }
@@ -89,12 +88,12 @@ export default {
   },
 
   /**
-   * Update an allowed user's role (admin only)
+   * Update an allowed user's info (admin only)
    * @param {string} mobile
-   * @param {string} role - 'admin' or 'user'
+   * @param {{ name?: string, role?: string }} data
    */
-  updateUserRole(mobile, role) {
-    return api.patch(`/admin/users/${mobile}/role`, { role })
+  updateUser(mobile, data) {
+    return api.put(`/admin/users/${mobile}`, data)
   },
 
   /**

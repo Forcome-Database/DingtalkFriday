@@ -3,6 +3,7 @@ JWT utilities and FastAPI authentication dependencies.
 """
 
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
@@ -13,6 +14,42 @@ from sqlalchemy import select
 from app.config import settings
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Whitelist cache: {mobile: (is_allowed, timestamp)}
+# Avoids hitting SQLite on every request; TTL = 300s (5 min).
+# ---------------------------------------------------------------------------
+_whitelist_cache: Dict[str, tuple[bool, float]] = {}
+_CACHE_TTL = 300  # seconds
+
+
+def invalidate_whitelist_cache(mobile: str) -> None:
+    """Remove a specific user from the whitelist cache (called on admin ops)."""
+    _whitelist_cache.pop(mobile, None)
+
+
+async def _check_whitelist(mobile: str) -> bool:
+    """Check if mobile is in allowed_user table or is an admin. Uses TTL cache."""
+    now = time.monotonic()
+    cached = _whitelist_cache.get(mobile)
+    if cached and (now - cached[1]) < _CACHE_TTL:
+        return cached[0]
+
+    # Cache miss or expired — query DB
+    if mobile in _get_admin_phones():
+        _whitelist_cache[mobile] = (True, now)
+        return True
+
+    from app.database import async_session
+    from app.models import AllowedUser
+    async with async_session() as session:
+        result = await session.execute(
+            select(AllowedUser.mobile).where(AllowedUser.mobile == mobile)
+        )
+        allowed = result.scalar_one_or_none() is not None
+
+    _whitelist_cache[mobile] = (allowed, now)
+    return allowed
 
 
 def _get_admin_phones() -> list[str]:
@@ -68,6 +105,7 @@ async def get_current_user(request: Request) -> Dict[str, Any]:
     """
     FastAPI dependency: extract and verify JWT from Authorization header.
     Returns the token payload dict with keys: userid, name, mobile.
+    Also re-checks whitelist status (cached, TTL 5 min).
     """
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
@@ -77,6 +115,15 @@ async def get_current_user(request: Request) -> Dict[str, Any]:
         )
     token = auth_header[7:]
     payload = decode_token(token)
+
+    # Re-check whitelist — prevents revoked users from accessing data
+    mobile = payload.get("mobile", "")
+    if not mobile or not await _check_whitelist(mobile):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="您的访问权限已被撤销",
+        )
+
     return payload
 
 

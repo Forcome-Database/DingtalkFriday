@@ -54,9 +54,10 @@ class AddUserRequest(BaseModel):
     role: str = Field(default="user", description="Role: admin or user")
 
 
-class UpdateUserRoleRequest(BaseModel):
-    """Request body for PATCH /api/admin/users/{mobile}/role."""
-    role: str = Field(description="Role: admin or user")
+class UpdateUserRequest(BaseModel):
+    """Request body for PUT /api/admin/users/{mobile}."""
+    name: Optional[str] = Field(default=None, description="Display name")
+    role: Optional[str] = Field(default=None, description="Role: admin or user")
 
 
 class AllowedUserOut(BaseModel):
