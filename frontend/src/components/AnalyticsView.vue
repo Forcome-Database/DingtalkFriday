@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useAnalyticsData } from '../composables/useAnalyticsData.js'
-import apiClient from '../api/index.js'
+import { businessDateParts } from '../utils/date.js'
 import TripAnalyticsSection from './TripAnalyticsSection.vue'
 
 // ECharts tree-shakable imports
@@ -49,7 +49,7 @@ function getLeaveColor(typeName, fallbackIndex = 0) {
 }
 
 // --- Year options ---
-const currentYear = new Date().getFullYear()
+const currentYear = businessDateParts().year
 const yearOptions = [currentYear, currentYear - 1]
 
 // --- Analytics data ---
@@ -62,11 +62,12 @@ const {
   weekdayDistribution,
   employeeRanking,
   fetchAll,
+  fetchDepartmentComparison,
+  deptMetric,
   switchYear
 } = useAnalyticsData()
 
 // --- Department comparison metric toggle ---
-const deptMetric = ref('total')
 
 // --- Chart DOM refs ---
 const trendChartRef = ref(null)
@@ -109,6 +110,7 @@ function ensureChartInstance(instance, domRef) {
  * Render the monthly trend line chart.
  */
 function renderTrendChart() {
+  if (!monthlyTrend.value) { trendChart?.clear(); return }
   if (!trendChartRef.value) return
   trendChart = ensureChartInstance(trendChart, trendChartRef)
 
@@ -193,6 +195,7 @@ function renderTrendChart() {
  * Render the leave type distribution pie/doughnut chart.
  */
 function renderPieChart() {
+  if (!leaveTypeDistribution.value) { pieChart?.clear(); return }
   if (!pieChartRef.value) return
   pieChart = ensureChartInstance(pieChart, pieChartRef)
 
@@ -260,6 +263,7 @@ function renderPieChart() {
  * Render the department comparison horizontal bar chart.
  */
 function renderDeptChart() {
+  if (!departmentComparison.value) { deptChart?.clear(); return }
   if (!deptChartRef.value) return
   deptChart = ensureChartInstance(deptChart, deptChartRef)
 
@@ -271,7 +275,7 @@ function renderDeptChart() {
   const sorted = [...top].reverse()
   const depts = sorted.map(d => d.name)
   const values = sorted.map(d => d[sortKey])
-  const avg = values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0
+  const avg = raw.average ?? 0
 
   // Dynamically resize chart height based on item count
   const chartHeight = Math.max(250, sorted.length * 32 + 60)
@@ -354,6 +358,7 @@ function renderDeptChart() {
  * Render the weekday distribution vertical bar chart.
  */
 function renderWeekdayChart() {
+  if (!weekdayDistribution.value) { weekdayChart?.clear(); return }
   if (!weekdayChartRef.value) return
   weekdayChart = ensureChartInstance(weekdayChart, weekdayChartRef)
 
@@ -420,6 +425,7 @@ function renderWeekdayChart() {
  * Render the employee ranking stacked horizontal bar chart.
  */
 function renderRankingChart() {
+  if (!employeeRanking.value) { rankingChart?.clear(); return }
   if (!rankingChartRef.value) return
   rankingChart = ensureChartInstance(rankingChart, rankingChartRef)
 
@@ -551,12 +557,7 @@ function handleResize() {
  * Re-fetches department comparison data for the selected metric.
  */
 async function handleDeptMetricChange(metric) {
-  deptMetric.value = metric
-  try {
-    departmentComparison.value = await apiClient.getDepartmentComparison(year.value, metric)
-  } catch (err) {
-    console.error('[Analytics] Failed to refresh department comparison:', err)
-  }
+  await fetchDepartmentComparison(metric)
 }
 
 // --- Watch data changes to re-render charts ---

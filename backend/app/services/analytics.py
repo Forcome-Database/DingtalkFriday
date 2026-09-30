@@ -9,26 +9,22 @@ Provides aggregation queries for dashboard analytics:
 - Employee leave ranking
 """
 
-import calendar
 import logging
 from collections import defaultdict
-from datetime import date as date_type, timedelta
-from typing import Dict, List, Optional
+from datetime import date as date_type
+from typing import Dict, List
 
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import async_session
-from app.models import Employee, LeaveRecord, LeaveType
+from app.models import Department, Employee, LeaveRecord, LeaveType
+from app.services.department_stats import build_department_comparison
 from app.services.leave import (
     _convert_duration,
-    _count_workdays,
     _get_leave_type_map,
-    _is_calendar_day_leave,
-    _is_workday,
-    _month_range_ms,
-    _ms_to_datetime,
     _prorate_duration,
+    _record_daily_hours,
     _year_range_ms,
 )
 
@@ -50,6 +46,7 @@ async def _load_year_records(
             and_(
                 LeaveRecord.start_time <= year_end_ms,
                 LeaveRecord.end_time >= year_start_ms,
+                LeaveRecord.status == "已审批",
             )
         )
     )
@@ -91,12 +88,9 @@ async def get_monthly_trend(year: int) -> dict:
     def _aggregate_by_month(records: List[LeaveRecord], target_year: int) -> List[dict]:
         monthly: Dict[int, float] = {m: 0.0 for m in range(1, 13)}
         for rec in records:
-            for m in range(1, 13):
-                _, last_day = calendar.monthrange(target_year, m)
-                m_start = date_type(target_year, m, 1)
-                m_end = date_type(target_year, m, last_day)
-                days = _prorate_duration(rec, m_start, m_end, type_map, "day")
-                monthly[m] += days
+            for day, hours in _record_daily_hours(rec, type_map).items():
+                if day.year == target_year:
+                    monthly[day.month] += hours / 8.0
         return [
             {"month": m, "days": round(monthly[m], 1)}
             for m in range(1, 13)
@@ -184,50 +178,22 @@ async def get_department_comparison(year: int, metric: str = "total") -> dict:
         # Load all employees to build dept mapping and headcount
         emp_result = await session.execute(select(Employee))
         employees = emp_result.scalars().all()
+        dept_result = await session.execute(select(Department))
+        departments = dept_result.scalars().all()
         records = await _load_year_records(session, year)
 
     # Build employee lookup and dept headcount
     emp_map = {e.userid: e for e in employees}
-    dept_headcount: Dict[str, int] = defaultdict(int)
-    for emp in employees:
-        dept_name = emp.dept_name or "未分配"
-        dept_headcount[dept_name] += 1
-
     # Aggregate leave days per department (prorated to target year)
-    dept_days: Dict[str, float] = defaultdict(float)
+    dept_days: Dict[int, float] = defaultdict(float)
     for rec in records:
         emp = emp_map.get(rec.userid)
         if not emp:
             continue
-        dept_name = emp.dept_name or "未分配"
         days = _prorate_duration(rec, year_start, year_end, type_map, "day")
-        dept_days[dept_name] += days
+        dept_days[emp.dept_id] += days
 
-    # Build department list (include all departments that have employees)
-    departments = []
-    for dept_name, headcount in dept_headcount.items():
-        total_days = dept_days.get(dept_name, 0.0)
-        avg_days = total_days / headcount if headcount > 0 else 0.0
-        departments.append({
-            "name": dept_name,
-            "totalDays": round(total_days, 1),
-            "avgDays": round(avg_days, 1),
-            "headcount": headcount,
-        })
-
-    # Sort by the requested metric (descending)
-    sort_key = "avgDays" if metric == "avg" else "totalDays"
-    departments.sort(key=lambda d: d[sort_key], reverse=True)
-
-    # Calculate overall average (average of department totalDays)
-    avg = 0.0
-    if departments:
-        avg = sum(d["totalDays"] for d in departments) / len(departments)
-
-    return {
-        "departments": departments,
-        "average": round(avg, 1),
-    }
+    return build_department_comparison(employees, departments, dept_days, metric)
 
 
 # ---------------------------------------------------------------------------
@@ -259,6 +225,7 @@ async def get_weekday_distribution(year: int) -> dict:
     """
     year_start = date_type(year, 1, 1)
     year_end = date_type(year, 12, 31)
+    type_map = await _get_leave_type_map()
 
     async with async_session() as session:
         records = await _load_year_records(session, year)
@@ -267,22 +234,9 @@ async def get_weekday_distribution(year: int) -> dict:
     weekday_counts: Dict[int, int] = {i: 0 for i in range(5)}
 
     for rec in records:
-        start_date = _ms_to_datetime(rec.start_time).date()
-        end_date = _ms_to_datetime(rec.end_time).date()
-        calendar_day_leave = _is_calendar_day_leave(rec.leave_type)
-
-        # Clamp to year boundaries to avoid counting days outside target year
-        clamped_start = max(start_date, year_start)
-        clamped_end = min(end_date, year_end)
-
-        current = clamped_start
-        while current <= clamped_end:
-            # 产假/婚假按自然日统计（含周末节假日），其他假期只统计工作日
-            if calendar_day_leave or _is_workday(current):
-                wd = current.weekday()  # 0=Mon .. 4=Fri
-                if wd in weekday_counts:
-                    weekday_counts[wd] += 1
-            current += timedelta(days=1)
+        for day, hours in _record_daily_hours(rec, type_map).items():
+            if year_start <= day <= year_end and hours > 0 and day.weekday() in weekday_counts:
+                weekday_counts[day.weekday()] += 1
 
     weekdays = [
         {

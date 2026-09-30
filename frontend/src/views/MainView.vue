@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { useLeaveData } from '../composables/useLeaveData.js'
 import { useTripData } from '../composables/useTripData.js'
 import { useAuth } from '../composables/useAuth.js'
+import { formatBusinessTimestamp } from '../utils/date.js'
 import AppHeader from '../components/AppHeader.vue'
 import FilterPanel from '../components/FilterPanel.vue'
 import StatsCards from '../components/StatsCards.vue'
@@ -49,6 +50,9 @@ const {
   todayLeaveLoading,
   todayLeaveDate,
   syncing,
+  syncMessage,
+  syncStatus,
+  errorMessage,
   yearOptions,
 
   // Methods
@@ -67,6 +71,7 @@ const {
   toggleSort,
   setUnit,
   triggerSync,
+  refreshSyncStatus,
   exportExcel,
   fetchTodayLeaveDetail,
   exportLeaveDetail,
@@ -91,6 +96,9 @@ const {
   calendarLoading: tripCalendarLoading,
   selectedCell: tripSelectedCell,
   syncing: tripSyncing,
+  syncMessage: tripSyncMessage,
+  syncStatus: tripSyncStatus,
+  errorMessage: tripErrorMessage,
   yearOptions: tripYearOptions,
   loadDepartments1: loadTripDepts1,
   loadDepartments2: loadTripDepts2,
@@ -105,6 +113,7 @@ const {
   setPageSize: tripSetPageSize,
   toggleSort: tripToggleSort,
   triggerTripSync, exportTripExcel,
+  refreshSyncStatus: refreshTripSyncStatus,
 } = useTripData()
 
 /** Active page: 'export' (default), 'trip', 'analytics', or 'admin' */
@@ -137,13 +146,8 @@ async function handleExport() {
 /**
  * Handle trip sync button click
  */
-function handleTripSync() {
-  triggerTripSync()
-  // Refresh data after a delay to allow sync to process some records
-  setTimeout(() => {
-    fetchTripData()
-    fetchDailyTripCount()
-  }, 5000)
+async function handleTripSync() {
+  await triggerTripSync()
 }
 
 /**
@@ -190,6 +194,8 @@ function handleLogout() {
 onMounted(async () => {
   // Refresh user info from server (picks up admin status changes)
   refreshUser()
+  refreshSyncStatus()
+  refreshTripSyncStatus()
   await Promise.all([loadDepartments1(), loadLeaveTypes()])
   await fetchData()
 
@@ -208,6 +214,8 @@ onMounted(async () => {
       :exporting="exporting"
       :trip-syncing="tripSyncing"
       :trip-exporting="tripExporting"
+      :sync-message="syncMessage"
+      :trip-sync-message="tripSyncMessage"
       :sync-year="filters.year"
       :active-page="activePage"
       :current-user="currentUser"
@@ -219,6 +227,18 @@ onMounted(async () => {
       @page-change="activePage = $event"
       @logout="handleLogout"
     />
+
+    <div v-if="activePage === 'export'" class="px-4 sm:px-6 lg:px-8 pt-3 text-xs text-text-secondary space-y-1" role="status">
+      <p v-if="syncMessage || syncStatus?.freshness?.leave?.message">{{ syncMessage || syncStatus.freshness.leave.message }}</p>
+      <p v-if="syncStatus?.freshness?.leave?.last_success_at">最近成功同步：{{ formatBusinessTimestamp(syncStatus.freshness.leave.last_success_at) }}</p>
+      <p v-if="syncStatus?.freshness?.leave?.pending_count" class="text-amber-700">待复核 {{ syncStatus.freshness.leave.pending_count }} 条，未计入已审批统计</p>
+      <p v-if="errorMessage" class="text-red-600">{{ errorMessage }}</p>
+    </div>
+    <div v-if="activePage === 'trip'" class="px-4 sm:px-6 lg:px-8 pt-3 text-xs text-text-secondary space-y-1" role="status">
+      <p v-if="tripSyncMessage || tripSyncStatus?.freshness?.trip?.message">{{ tripSyncMessage || tripSyncStatus.freshness.trip.message }}</p>
+      <p v-if="tripSyncStatus?.freshness?.trip?.last_success_at">最近成功同步：{{ formatBusinessTimestamp(tripSyncStatus.freshness.trip.last_success_at) }}</p>
+      <p v-if="tripErrorMessage" class="text-red-600">{{ tripErrorMessage }}</p>
+    </div>
 
     <!-- Data export page (existing content) -->
     <div v-if="activePage === 'export'" class="p-4 sm:p-6 lg:p-8 space-y-4 sm:space-y-6">
@@ -247,7 +267,7 @@ onMounted(async () => {
         :stats="stats"
         :unit="filters.unit"
         :today-leave-count="todayLeaveCount"
-        :today-trip-count="(tripStats.todayTripCount || 0) + (tripStats.todayOutingCount || 0)"
+        :today-trip-count="tripStats.todayTotalCount || 0"
         @today-leave-click="fetchTodayLeaveDetail"
         @today-trip-click="fetchTodayTripDetail('')"
       />

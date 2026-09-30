@@ -1,5 +1,6 @@
 <script setup>
 import { computed } from 'vue'
+import { businessDate, shiftBusinessDate } from '../utils/date.js'
 import { X, Clock, Briefcase, Download, ChevronLeft, ChevronRight } from 'lucide-vue-next'
 
 const props = defineProps({
@@ -32,9 +33,7 @@ const props = defineProps({
 
 const emit = defineEmits(['close', 'date-change', 'export'])
 
-const todayStr = new Date().toISOString().slice(0, 10)
-
-const isToday = computed(() => props.selectedDate === todayStr)
+const isToday = computed(() => props.visible && props.selectedDate === businessDate())
 
 const displayDate = computed(() => {
   if (!props.selectedDate || isToday.value) return '今日'
@@ -55,15 +54,11 @@ const title = computed(() => {
 })
 
 function prevDay() {
-  const d = new Date(props.selectedDate)
-  d.setDate(d.getDate() - 1)
-  emit('date-change', d.toISOString().slice(0, 10))
+  emit('date-change', shiftBusinessDate(props.selectedDate, -1))
 }
 
 function nextDay() {
-  const d = new Date(props.selectedDate)
-  d.setDate(d.getDate() + 1)
-  emit('date-change', d.toISOString().slice(0, 10))
+  emit('date-change', shiftBusinessDate(props.selectedDate, 1))
 }
 
 function onDateInput(event) {
@@ -71,7 +66,7 @@ function onDateInput(event) {
 }
 
 function goToday() {
-  emit('date-change', todayStr)
+  emit('date-change', businessDate())
 }
 
 function getTagConfig(tagName) {
@@ -128,8 +123,8 @@ function onOverlayClick(event) {
               </div>
 
               <!-- Date selector row -->
-              <div class="flex items-center justify-between mt-3">
-                <div class="flex items-center gap-1.5">
+              <div class="flex flex-wrap items-center justify-between gap-2 mt-3">
+                <div class="flex items-center gap-1.5 shrink-0">
                   <button
                     class="w-7 h-7 flex items-center justify-center rounded-md hover:bg-surface text-text-tertiary hover:text-text-primary transition-colors"
                     @click="prevDay"
@@ -138,7 +133,7 @@ function onOverlayClick(event) {
                   </button>
                   <label class="relative cursor-pointer">
                     <span
-                      class="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-sm font-medium border border-border-default hover:bg-surface transition-colors"
+                      class="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-sm font-medium whitespace-nowrap border border-border-default hover:bg-surface transition-colors"
                     >
                       {{ displayDate }}
                       <span class="text-text-tertiary text-[12px]">{{ selectedDate }}</span>
@@ -166,7 +161,7 @@ function onOverlayClick(event) {
                 </div>
 
                 <button
-                  class="flex items-center gap-1.5 px-3 py-1.5 text-[13px] font-medium text-text-secondary rounded-lg border border-border-default hover:bg-surface hover:text-text-primary transition-colors"
+                  class="flex items-center gap-1.5 shrink-0 ml-auto whitespace-nowrap px-3 py-1.5 text-[13px] font-medium text-text-secondary rounded-lg border border-border-default hover:bg-surface hover:text-text-primary transition-colors"
                   :disabled="detail.length === 0"
                   @click="emit('export')"
                 >

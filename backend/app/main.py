@@ -15,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
+from app import event_models  # Register durable event tables before init_db.
 from app.database import async_session, init_db
 from app.routers import admin, analytics, auth, departments, export, leave, sync, trip, trip_analytics
 
@@ -53,11 +54,11 @@ async def _ensure_admin_users() -> None:
                     role="admin",
                     created_at=datetime.utcnow(),
                 ))
-                logger.info("Added admin phone %s to allowed_user table", phone)
+                logger.info("Added configured admin to allowed_user table")
             elif getattr(existing, "role", None) != "admin":
                 existing.role = "admin"
                 session.add(existing)
-                logger.info("Updated admin phone %s role to admin", phone)
+                logger.info("Updated configured admin role")
         await session.commit()
 
 
@@ -120,7 +121,11 @@ def _setup_trip_scheduler():
             logger.info("Scheduled trip sync triggered by cron: %s", cron_expr)
             try:
                 from app.services.trip_sync import sync_trip_records
-                await sync_trip_records()
+                if settings.dingtalk_stream_enabled:
+                    from app.services.events import compensate_trip_sync
+                    await compensate_trip_sync()
+                else:
+                    await sync_trip_records()
             except Exception as e:
                 logger.exception("Scheduled trip sync failed: %s", e)
 
@@ -140,9 +145,8 @@ async def lifespan(app: FastAPI):
     await init_db()
     logger.info("Database initialized")
 
-    # Log loaded config for debugging
-    from app.auth import _get_admin_phones
-    logger.info("ADMIN_PHONES config: %r → parsed: %s", settings.admin_phones, _get_admin_phones())
+    from app.services.events import start_event_service, stop_event_service
+    await start_event_service()
 
     # Ensure admin users are in allowed_user table
     await _ensure_admin_users()
@@ -158,6 +162,8 @@ async def lifespan(app: FastAPI):
     if _scheduler:
         _scheduler.shutdown(wait=False)
         logger.info("APScheduler shut down")
+
+    await stop_event_service()
 
     from app.dingtalk.client import dingtalk_client
     await dingtalk_client.close()

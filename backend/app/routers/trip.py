@@ -1,7 +1,7 @@
 """Trip (business trip / out-of-office) API endpoints."""
 
-import asyncio
 import logging
+from datetime import date as date_type
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Query
@@ -29,7 +29,6 @@ from app.services.trip_sync import sync_trip_records
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/trip", tags=["trip"])
 
-_trip_sync_lock = asyncio.Lock()
 
 
 @router.get("/monthly-summary", response_model=TripMonthlySummaryResponse)
@@ -62,10 +61,11 @@ async def daily_detail(
     employeeId: str = Query(..., description="Employee userid"),
     year: int = Query(..., description="Year"),
     month: int = Query(..., ge=1, le=12, description="Month (1-12)"),
+    tripType: Optional[str] = Query(default=None, description="出差 or 外出"),
     _user=Depends(get_current_user),
 ):
     """Get daily trip records for a specific employee in a given month."""
-    return await get_trip_daily_detail(employeeId, year, month)
+    return await get_trip_daily_detail(employeeId, year, month, trip_type=tripType)
 
 
 @router.get("/today", response_model=TripTodayResponse)
@@ -73,21 +73,12 @@ async def today_list(
     deptId: Optional[int] = Query(default=None, description="Department ID filter"),
     tripType: Optional[str] = Query(default=None, description="出差 or 外出"),
     employeeName: Optional[str] = Query(default=None, description="Employee name keyword"),
-    date: Optional[str] = Query(default=None, description="Target date YYYY-MM-DD (defaults to today)"),
+    date: Optional[date_type] = Query(default=None, description="Target date YYYY-MM-DD (defaults to today)"),
     _user=Depends(get_current_user),
 ):
     """Get trip/outing records for a specific date with optional filtering."""
-    from datetime import date as date_type
-
-    target_date = None
-    if date:
-        try:
-            target_date = date_type.fromisoformat(date)
-        except ValueError:
-            pass
-
     return await get_trip_today(
-        dept_id=deptId, trip_type=tripType, employee_name=employeeName, target_date=target_date
+        dept_id=deptId, trip_type=tripType, employee_name=employeeName, target_date=date
     )
 
 
@@ -149,22 +140,14 @@ async def export_today_trip(
     deptId: Optional[int] = Query(default=None),
     tripType: Optional[str] = Query(default=None),
     employeeName: Optional[str] = Query(default=None),
-    date: Optional[str] = Query(default=None),
+    date: Optional[date_type] = Query(default=None),
     _user=Depends(get_current_user),
 ):
     """Export trip detail for a specific date as Excel."""
-    from datetime import date as date_type
     from urllib.parse import quote
 
-    target_date = None
-    if date:
-        try:
-            target_date = date_type.fromisoformat(date)
-        except ValueError:
-            pass
-
     data = await get_trip_today(
-        dept_id=deptId, trip_type=tripType, employee_name=employeeName, target_date=target_date
+        dept_id=deptId, trip_type=tripType, employee_name=employeeName, target_date=date
     )
     output = export_trip_detail(data)
     date_str = data.get("date", "")
@@ -179,11 +162,10 @@ async def export_today_trip(
 
 async def _run_trip_sync(force_month: Optional[str] = None) -> None:
     """Background task that runs the trip sync."""
-    async with _trip_sync_lock:
-        try:
-            await sync_trip_records(force_month)
-        except Exception as e:
-            logger.exception("Background trip sync failed: %s", e)
+    try:
+        await sync_trip_records(force_month, reserved=True, recover_gap=force_month is None)
+    except Exception as e:
+        logger.exception("Background trip sync failed: %s", e)
 
 
 @router.post("/sync", response_model=MessageResponse)
@@ -197,7 +179,8 @@ async def trigger_sync(
     Returns immediately while the sync runs asynchronously.
     Optionally pass a month (YYYY-MM) to force-sync that entire month.
     """
-    if _trip_sync_lock.locked():
+    from app.services.trip_sync import reserve_trip_sync
+    if not reserve_trip_sync():
         return MessageResponse(message="Trip sync is already running", success=False)
 
     month = request.month if request else None

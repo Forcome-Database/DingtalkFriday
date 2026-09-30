@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     dingtalk_app_key: str = ""
     dingtalk_app_secret: str = ""
     dingtalk_base_url: str = "https://oapi.dingtalk.com"
+    dingtalk_request_interval: float = 0.05
+    dingtalk_stream_enabled: bool = False
+    dingtalk_stream_compensation_enabled: bool = False
+    event_poll_seconds: float = 5.0
 
     # Database configuration
     database_url: str = "sqlite+aiosqlite:///./data/leave.db"
@@ -40,6 +44,7 @@ class Settings(BaseSettings):
 
     # Scheduled sync cron expression (empty = disabled), e.g. "0 2 * * *"
     sync_cron: str = ""
+    leave_sync_verify_vacation: bool = True
 
     # DingTalk Corp ID (required for H5 micro-app login)
     dingtalk_corp_id: str = ""

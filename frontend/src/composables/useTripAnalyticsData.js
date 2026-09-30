@@ -7,6 +7,10 @@ import api from '../api/index.js'
  */
 export function useTripAnalyticsData(yearRef) {
   const loading = ref(false)
+  const deptMetric = ref('total')
+  let requestVersion = 0
+  let departmentVersion = 0
+  let activeYear = yearRef.value
 
   // Chart data refs
   const monthlyTrend = ref(null)
@@ -16,7 +20,15 @@ export function useTripAnalyticsData(yearRef) {
   const employeeRanking = ref(null)
 
   async function fetchAll(targetYear) {
+    const version = ++requestVersion
+    const deptVersion = ++departmentVersion
+    activeYear = targetYear
     loading.value = true
+    monthlyTrend.value = null
+    typeDistribution.value = null
+    departmentComparison.value = null
+    weekdayDistribution.value = null
+    employeeRanking.value = null
     try {
       const [trendData, typeData, deptData, weekdayData, rankingData] = await Promise.all([
         api.getTripMonthlyTrend(targetYear).catch(err => {
@@ -27,7 +39,7 @@ export function useTripAnalyticsData(yearRef) {
           console.error('[TripAnalytics] Failed to fetch type distribution:', err)
           return null
         }),
-        api.getTripDepartmentComparison(targetYear).catch(err => {
+        api.getTripDepartmentComparison(targetYear, deptMetric.value).catch(err => {
           console.error('[TripAnalytics] Failed to fetch department comparison:', err)
           return null
         }),
@@ -41,12 +53,14 @@ export function useTripAnalyticsData(yearRef) {
         }),
       ])
 
+      if (version !== requestVersion) return
       monthlyTrend.value = trendData
       typeDistribution.value = typeData
-      departmentComparison.value = deptData
+      if (deptVersion === departmentVersion) departmentComparison.value = deptData
       weekdayDistribution.value = weekdayData
       employeeRanking.value = rankingData
     } catch (err) {
+      if (version !== requestVersion) return
       console.error('[TripAnalytics] Unexpected error in fetchAll:', err)
       monthlyTrend.value = null
       typeDistribution.value = null
@@ -54,22 +68,37 @@ export function useTripAnalyticsData(yearRef) {
       weekdayDistribution.value = null
       employeeRanking.value = null
     } finally {
-      loading.value = false
+      if (version === requestVersion) loading.value = false
+    }
+  }
+
+  async function fetchDepartmentComparison(metric) {
+    deptMetric.value = metric
+    const version = ++departmentVersion
+    const targetYear = activeYear
+    departmentComparison.value = null
+    try {
+      const data = await api.getTripDepartmentComparison(targetYear, metric)
+      if (version === departmentVersion && targetYear === activeYear) departmentComparison.value = data
+    } catch (err) {
+      console.error('[TripAnalytics] Failed to refresh department comparison:', err)
     }
   }
 
   // Watch year prop changes and re-fetch
   watch(yearRef, (newYear) => {
     fetchAll(newYear)
-  })
+  }, { flush: 'sync' })
 
   return {
     loading,
+    deptMetric,
     monthlyTrend,
     typeDistribution,
     departmentComparison,
     weekdayDistribution,
     employeeRanking,
     fetchAll,
+    fetchDepartmentComparison,
   }
 }

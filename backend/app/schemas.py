@@ -225,6 +225,7 @@ class SyncTriggerRequest(BaseModel):
 class SyncStatusOut(BaseModel):
     """Single sync log entry."""
     id: int
+    task_id: Optional[str] = None
     sync_type: str
     status: str
     message: Optional[str] = None
@@ -235,6 +236,18 @@ class SyncStatusOut(BaseModel):
 class SyncStatusResponse(BaseModel):
     """Response for GET /api/sync/status."""
     logs: List[SyncStatusOut]
+    task: Optional[SyncStatusOut] = None
+    latest: Dict[str, Optional[SyncStatusOut]] = Field(default_factory=dict)
+    running: Dict[str, bool] = Field(default_factory=dict)
+    freshness: Dict[str, "SyncFreshnessOut"] = Field(default_factory=dict)
+    events: Dict = Field(default_factory=dict)
+
+
+class SyncFreshnessOut(BaseModel):
+    last_success_at: Optional[datetime] = None
+    state: str = "never"
+    message: Optional[str] = None
+    pending_count: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -363,6 +376,7 @@ class MessageResponse(BaseModel):
     """Generic message response."""
     message: str
     success: bool = True
+    taskId: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -374,6 +388,7 @@ class TripStats(BaseModel):
     totalDays: float = Field(description="Total days (sum of duration_hours / 8)")
     todayTripCount: int = Field(description="Today's business trip headcount")
     todayOutingCount: int = Field(description="Today's out-of-office headcount")
+    todayTotalCount: int = Field(default=0, description="Today's distinct trip or outing headcount")
 
 
 class TripEmployeeRow(BaseModel):

@@ -17,7 +17,8 @@ from typing import Dict, List
 from sqlalchemy import select, and_
 
 from app.database import async_session
-from app.models import Employee, TripRecord
+from app.models import Department, Employee, TripRecord
+from app.services.department_stats import build_department_comparison
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,7 @@ async def _load_year_trip_records(year: int) -> List[TripRecord]:
                 and_(
                     TripRecord.work_date >= f"{year}-01-01",
                     TripRecord.work_date <= f"{year}-12-31",
+                    TripRecord.duration_hours > 0,
                 )
             )
         )
@@ -108,37 +110,18 @@ async def get_trip_department_comparison(year: int, metric: str = "total") -> di
     records = await _load_year_trip_records(year)
     emp_map = await _load_employees()
 
-    dept_headcount: Dict[str, int] = defaultdict(int)
-    for emp in emp_map.values():
-        dept_headcount[emp.dept_name or "未分配"] += 1
+    async with async_session() as session:
+        dept_result = await session.execute(select(Department))
+        departments = dept_result.scalars().all()
 
-    dept_days: Dict[str, float] = defaultdict(float)
+    dept_days: Dict[int, float] = defaultdict(float)
     for rec in records:
         emp = emp_map.get(rec.userid)
         if not emp:
             continue
-        dept_name = emp.dept_name or "未分配"
-        dept_days[dept_name] += _hours_to_days(rec.duration_hours)
+        dept_days[emp.dept_id] += _hours_to_days(rec.duration_hours)
 
-    departments = []
-    for dept_name, headcount in dept_headcount.items():
-        total_days = dept_days.get(dept_name, 0.0)
-        avg_days = total_days / headcount if headcount > 0 else 0.0
-        departments.append({
-            "name": dept_name,
-            "totalDays": round(total_days, 1),
-            "avgDays": round(avg_days, 1),
-            "headcount": headcount,
-        })
-
-    sort_key = "avgDays" if metric == "avg" else "totalDays"
-    departments.sort(key=lambda d: d[sort_key], reverse=True)
-
-    avg = 0.0
-    if departments:
-        avg = sum(d[sort_key] for d in departments) / len(departments)
-
-    return {"departments": departments, "average": round(avg, 1)}
+    return build_department_comparison(list(emp_map.values()), departments, dept_days, metric)
 
 
 # ---------------------------------------------------------------------------

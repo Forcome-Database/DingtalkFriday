@@ -7,18 +7,57 @@ using a partitioned caching strategy (hot/warm/cold zones).
 
 import asyncio
 import logging
+import random
+from weakref import WeakValueDictionary
 from datetime import datetime, date, timedelta, timezone
 from typing import List, Optional
 
 from sqlalchemy import select, delete
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.exc import OperationalError
 
 from app.database import async_session
+from app.event_models import ApprovalScope, AttendanceRefresh
 from app.models import Employee, TripRecord, TripSyncCursor, SyncLog
 from app.dingtalk.attendance import get_update_data
+from app.dingtalk.client import DingTalkClientError, dingtalk_client
 from app.config import settings
+from app.services.durations import allocate_hours_by_date, business_today
 
 logger = logging.getLogger(__name__)
+_trip_sync_reserved = False
+_day_locks: WeakValueDictionary = WeakValueDictionary()
+
+
+class TripDataPending(RuntimeError):
+    """Attendance has not yet produced an authoritative date result."""
+
+
+def is_trip_sync_running() -> bool:
+    return _trip_sync_reserved
+
+
+def reserve_trip_sync() -> bool:
+    global _trip_sync_reserved
+    if _trip_sync_reserved:
+        return False
+    _trip_sync_reserved = True
+    return True
+
+
+def _approval_allocation(item: dict) -> dict:
+    start = datetime.fromisoformat(str(item["begin_time"]).replace("Z", "+00:00"))
+    end = datetime.fromisoformat(str(item["end_time"]).replace("Z", "+00:00"))
+    total = float(item["duration"])
+    unit = str(item.get("duration_unit", "")).lower()
+    if unit in {"day", "days", "天"}:
+        day_unit = True
+        total *= 8.0
+    elif unit in {"hour", "hours", "小时"}:
+        day_unit = False
+    else:
+        raise ValueError("Unknown approval duration unit")
+    return allocate_hours_by_date(start, end, total, calendar_days=True, day_unit=day_unit)
 
 
 async def _create_sync_log(sync_type: str = "trip_record") -> int:
@@ -58,7 +97,7 @@ def _build_date_list(
     Hot zone (always synced): today-hot_past .. today+hot_future
     Warm zone (synced only on designated days): today+hot_future+1 .. today+warm_future
     """
-    today = date.today()
+    today = business_today()
     dates = set()
 
     # Hot zone: always included
@@ -89,32 +128,14 @@ def _build_force_month_dates(month_str: str) -> List[date]:
     return dates
 
 
-async def _should_skip(userid: str, work_date: str, zone: str) -> bool:
-    """Check if a (userid, work_date) should be skipped based on zone.
-
-    Hot zone is never skipped. Warm zone is skipped if synced within 7 days.
-    """
-    if zone == "hot":
-        return False  # Hot zone always syncs
-
-    async with async_session() as session:
-        result = await session.execute(
-            select(TripSyncCursor).where(
-                TripSyncCursor.userid == userid,
-                TripSyncCursor.work_date == work_date,
-            )
-        )
-        cursor = result.scalar_one_or_none()
-
-    if cursor is None:
-        return False  # Never synced, don't skip
-
-    # Warm zone: skip if synced within 7 days
-    age = datetime.now(timezone.utc) - cursor.last_synced_at.replace(tzinfo=timezone.utc)
-    return age.total_seconds() < 7 * 86400
+async def _sync_one(userid: str, work_date_str: str, semaphore: asyncio.Semaphore, *, require_settled: bool = False) -> int:
+    key = (userid, work_date_str)
+    lock = _day_locks.setdefault(key, asyncio.Lock())
+    async with lock:
+        return await _sync_one_impl(userid, work_date_str, semaphore, require_settled=require_settled)
 
 
-async def _sync_one(userid: str, work_date_str: str, semaphore: asyncio.Semaphore) -> int:
+async def _sync_one_impl(userid: str, work_date_str: str, semaphore: asyncio.Semaphore, *, require_settled: bool = False) -> int:
     """Sync trip records for one user on one date.
 
     Returns count of records upserted. Uses a delete-then-insert strategy
@@ -123,85 +144,96 @@ async def _sync_one(userid: str, work_date_str: str, semaphore: asyncio.Semaphor
     to avoid wiping valid records.
     """
     async with semaphore:
-        await asyncio.sleep(0.05)  # 50ms throttle to avoid API rate limits
-
         data = await get_update_data(userid, work_date_str)
 
         # If the API returned an empty result, attendance for this date
         # has not been calculated yet — preserve existing records.
         if not data:
+            if require_settled:
+                raise TripDataPending()
             return 0
 
         approve_list = data.get("approve_list") or []
 
+        async with async_session() as session:
+            revoked_ids = set((await session.execute(select(ApprovalScope.instance_id).where(
+                ApprovalScope.userid == userid,
+                ApprovalScope.status.in_(["TERMINATED", "REVOKED", "REPLACED", "DELETED"]),
+            ))).scalars().all())
+
         # Filter biz_type=2 (trip/outing)
-        trip_items = [a for a in approve_list if a.get("biz_type") == 2]
+        trip_items = [a for a in approve_list if a.get("biz_type") == 2
+                      and (a.get("procInst_id") or a.get("proc_inst_id")) not in revoked_ids]
+        prepared = []
+        seen = set()
+        for item in trip_items:
+            proc_inst_id = item.get("procInst_id") or item.get("proc_inst_id")
+            if not proc_inst_id:
+                raise ValueError("Trip approval is missing its instance ID")
+            if proc_inst_id in seen:
+                continue
+            seen.add(proc_inst_id)
+            try:
+                allocation = _approval_allocation(item)
+            except (KeyError, TypeError) as exc:
+                raise ValueError("Trip approval has incomplete duration data") from exc
+            hours = allocation.get(date.fromisoformat(work_date_str), 0.0)
+            if hours > 0:
+                prepared.append((item, proc_inst_id, hours))
 
         now = datetime.now(timezone.utc)
 
-        # API returned valid attendance data — safe to delete-then-insert
-        async with async_session() as session:
-            await session.execute(
-                delete(TripRecord).where(
-                    TripRecord.userid == userid,
-                    TripRecord.work_date == work_date_str,
-                )
-            )
+        # Retry a locked SQLite transaction with the same fetched source data.
+        for attempt in range(3):
+            try:
+                async with async_session() as session:
+                    await session.execute(delete(TripRecord).where(
+                        TripRecord.userid == userid,
+                        TripRecord.work_date == work_date_str,
+                    ))
+                    for item, proc_inst_id, duration_hours in prepared:
+                        session.add(TripRecord(
+                            userid=userid,
+                            work_date=work_date_str,
+                            tag_name=item.get("tag_name", ""),
+                            sub_type=item.get("sub_type"),
+                            begin_time=str(item.get("begin_time", "")),
+                            end_time=str(item.get("end_time", "")),
+                            duration_hours=duration_hours,
+                            source_duration=float(item["duration"]),
+                            source_duration_unit=item["duration_unit"],
+                            proc_inst_id=proc_inst_id,
+                            last_synced_at=now,
+                            created_at=now,
+                        ))
+                    stmt = sqlite_insert(TripSyncCursor).values(
+                        userid=userid, work_date=work_date_str, last_synced_at=now,
+                    ).on_conflict_do_update(
+                        index_elements=["userid", "work_date"], set_={"last_synced_at": now},
+                    )
+                    await session.execute(stmt)
+                    await session.commit()
+                break
+            except OperationalError as exc:
+                error_code = getattr(exc.orig, "sqlite_errorcode", 0) or 0
+                if error_code & 255 not in {5, 6} or attempt == 2:
+                    raise
+                await asyncio.sleep(0.1 * 2 ** attempt)
 
-            for item in trip_items:
-                proc_inst_id = item.get("procInst_id") or item.get("proc_inst_id", "")
-                if not proc_inst_id:
-                    continue
-
-                tag_name = item.get("tag_name", "")
-
-                # Determine duration_hours for this day
-                duration_raw = item.get("duration")
-                duration_unit = item.get("duration_unit", "")
-                if duration_raw is not None:
-                    try:
-                        dur = float(duration_raw)
-                        # If unit is in days, convert to hours (8h per work day)
-                        if "day" in duration_unit.lower() or "天" in duration_unit:
-                            duration_hours = dur * 8
-                        else:
-                            duration_hours = dur
-                        # Cap at 8 hours per day
-                        duration_hours = min(duration_hours, 8.0)
-                    except (ValueError, TypeError):
-                        duration_hours = 8.0
-                else:
-                    duration_hours = 8.0  # Default full day
-
-                session.add(TripRecord(
-                    userid=userid,
-                    work_date=work_date_str,
-                    tag_name=tag_name,
-                    sub_type=item.get("sub_type"),
-                    begin_time=str(item.get("begin_time", "")),
-                    end_time=str(item.get("end_time", "")),
-                    duration_hours=duration_hours,
-                    proc_inst_id=proc_inst_id,
-                    last_synced_at=now,
-                    created_at=now,
-                ))
-
-            # Upsert sync cursor to track last sync time for this (userid, work_date)
-            stmt = sqlite_insert(TripSyncCursor).values(
-                userid=userid,
-                work_date=work_date_str,
-                last_synced_at=now,
-            ).on_conflict_do_update(
-                index_elements=["userid", "work_date"],
-                set_={"last_synced_at": now},
-            )
-            await session.execute(stmt)
-            await session.commit()
-
-        return len(trip_items)
+        return len(prepared)
 
 
-async def sync_trip_records(force_month: Optional[str] = None) -> str:
+async def sync_trip_records(force_month: Optional[str] = None, *, reserved: bool = False, recover_gap: bool = False) -> str:
+    global _trip_sync_reserved
+    if not reserved and not reserve_trip_sync():
+        return "Trip sync is already running"
+    try:
+        return await _sync_trip_records(force_month, recover_gap=recover_gap)
+    finally:
+        _trip_sync_reserved = False
+
+
+async def _sync_trip_records(force_month: Optional[str] = None, *, recover_gap: bool = False) -> str:
     """Main sync entry point.
 
     Args:
@@ -212,6 +244,8 @@ async def sync_trip_records(force_month: Optional[str] = None) -> str:
         Summary message string.
     """
     log_id = await _create_sync_log()
+    from app.services.events import trip_coverage_epoch
+    coverage_epoch = trip_coverage_epoch()
     try:
         # Get all employee userids
         async with async_session() as session:
@@ -241,33 +275,24 @@ async def sync_trip_records(force_month: Optional[str] = None) -> str:
         # Build date list based on sync mode
         if force_month:
             dates = _build_force_month_dates(force_month)
-            # Clear cursors for the forced month so _should_skip won't block anything
-            async with async_session() as session:
-                for d in dates:
-                    await session.execute(
-                        delete(TripSyncCursor).where(
-                            TripSyncCursor.work_date == d.isoformat(),
-                        )
-                    )
-                await session.commit()
             zone = "force"
         else:
-            is_monday = date.today().weekday() == 0
+            is_monday = business_today().weekday() == 0
             dates = _build_date_list(
                 hot_past=settings.trip_hot_days_past,
                 hot_future=settings.trip_hot_days_future,
                 warm_future=settings.trip_warm_days_future,
-                include_warm=is_monday,
+                include_warm=is_monday or recover_gap,
             )
             zone = "hot"  # Default zone; overridden per-date below
 
         # Build full-year date list for new employee backfill
         backfill_dates: set = set()
         if new_userids and not force_month:
-            year_start = date(date.today().year, 1, 1)
+            year_start = date(business_today().year, 1, 1)
             year_end = min(
-                date(date.today().year, 12, 31),
-                date.today() + timedelta(days=settings.trip_hot_days_future),
+                date(business_today().year, 12, 31),
+                business_today() + timedelta(days=settings.trip_hot_days_future),
             )
             d = year_start
             while d <= year_end:
@@ -280,7 +305,7 @@ async def sync_trip_records(force_month: Optional[str] = None) -> str:
                 len(backfill_dates), len(new_userids),
             )
 
-        today = date.today()
+        today = business_today()
         hot_start = today - timedelta(days=settings.trip_hot_days_past)
         hot_end = today + timedelta(days=settings.trip_hot_days_future)
 
@@ -289,6 +314,53 @@ async def sync_trip_records(force_month: Optional[str] = None) -> str:
         total_skipped = 0
         total_backfill = 0
         consecutive_failures = 0
+        total_failures = 0
+        request_start = dingtalk_client.request_counts().get("/topapi/attendance/getupdatedata", 0)
+        async with async_session() as session:
+            cursor_rows = (await session.execute(select(TripSyncCursor))).scalars().all()
+            cursors = {(row.userid, row.work_date): row.last_synced_at for row in cursor_rows}
+
+        def warm_is_fresh(uid, work_date):
+            synced_at = cursors.get((uid, work_date))
+            if synced_at is None:
+                return False
+            age = datetime.now(timezone.utc) - synced_at.replace(tzinfo=timezone.utc)
+            return age.total_seconds() < 7 * 86400
+
+        async def run_batch(batch):
+            nonlocal total_failures, consecutive_failures
+
+            async def run_one(uid, work_date):
+                for attempt in range(settings.trip_sync_retry_count + 1):
+                    try:
+                        return await _sync_one(uid, work_date, semaphore)
+                    except Exception as exc:
+                        retryable = isinstance(exc, DingTalkClientError) and exc.retryable
+                        if not retryable or attempt >= settings.trip_sync_retry_count:
+                            error_code = getattr(getattr(exc, "orig", None), "sqlite_errorcode", None)
+                            error = type(exc).__name__ + (f":sqlite:{error_code}" if error_code is not None else "")
+                            async with async_session() as session:
+                                await session.execute(sqlite_insert(AttendanceRefresh).values(
+                                    domain="trip", userid=uid, date_key=work_date,
+                                    attempts=1, error=error,
+                                    next_attempt_at=datetime.utcnow() + timedelta(seconds=10),
+                                ).on_conflict_do_update(
+                                    index_elements=["domain", "userid", "date_key"],
+                                    set_={"error": error, "next_attempt_at": datetime.utcnow() + timedelta(seconds=10)},
+                                ))
+                                await session.commit()
+                            logger.warning("Trip date refresh failed on %s: %s", work_date, error)
+                            return None
+                        await asyncio.sleep(2 ** attempt + random.uniform(0, 0.25))
+
+            results = await asyncio.gather(*(run_one(uid, work_date) for uid, work_date in batch))
+            for result in results:
+                if result is None:
+                    consecutive_failures += 1
+                    total_failures += 1
+                else:
+                    consecutive_failures = 0
+            return sum(result for result in results if result is not None)
 
         # --- Phase 1: Normal sync for all employees ---
         for d in dates:
@@ -301,8 +373,8 @@ async def sync_trip_records(force_month: Optional[str] = None) -> str:
             tasks = []
             for uid in all_userids:
                 # Skip check applies only to warm zone
-                if zone != "hot" and zone != "force":
-                    should_skip = await _should_skip(uid, work_date_str, zone)
+                if zone != "hot" and zone != "force" and not recover_gap:
+                    should_skip = warm_is_fresh(uid, work_date_str)
                     if should_skip:
                         total_skipped += 1
                         continue
@@ -318,27 +390,7 @@ async def sync_trip_records(force_month: Optional[str] = None) -> str:
 
                 batch = tasks[batch_start: batch_start + batch_size]
 
-                async def _sync_with_retry(uid, wds):
-                    nonlocal total_records, consecutive_failures
-                    for attempt in range(settings.trip_sync_retry_count + 1):
-                        try:
-                            count = await _sync_one(uid, wds, semaphore)
-                            total_records += count
-                            consecutive_failures = 0
-                            return
-                        except Exception as e:
-                            if attempt >= settings.trip_sync_retry_count:
-                                consecutive_failures += 1
-                                logger.warning(
-                                    "Failed to sync trip for %s on %s after %d retries: %s",
-                                    uid, wds, settings.trip_sync_retry_count, e,
-                                )
-                                return
-                            await asyncio.sleep(2 ** attempt)  # exponential back-off: 1s, 2s, 4s
-
-                await asyncio.gather(
-                    *[_sync_with_retry(uid, wds) for uid, wds in batch]
-                )
+                total_records += await run_batch(batch)
 
         # --- Phase 2: Backfill new employees for dates outside normal range ---
         if backfill_dates and consecutive_failures < settings.trip_sync_fail_threshold:
@@ -352,27 +404,7 @@ async def sync_trip_records(force_month: Optional[str] = None) -> str:
                 for batch_start in range(0, len(tasks), batch_size):
                     batch = tasks[batch_start: batch_start + batch_size]
 
-                    async def _backfill_with_retry(uid, wds):
-                        nonlocal total_backfill, consecutive_failures
-                        for attempt in range(settings.trip_sync_retry_count + 1):
-                            try:
-                                count = await _sync_one(uid, wds, semaphore)
-                                total_backfill += count
-                                consecutive_failures = 0
-                                return
-                            except Exception as e:
-                                if attempt >= settings.trip_sync_retry_count:
-                                    consecutive_failures += 1
-                                    logger.warning(
-                                        "Backfill failed for %s on %s: %s",
-                                        uid, wds, e,
-                                    )
-                                    return
-                                await asyncio.sleep(2 ** attempt)
-
-                    await asyncio.gather(
-                        *[_backfill_with_retry(uid, wds) for uid, wds in batch]
-                    )
+                    total_backfill += await run_batch(batch)
 
             logger.info("Backfill done: %d records for new employees", total_backfill)
 
@@ -390,9 +422,13 @@ async def sync_trip_records(force_month: Optional[str] = None) -> str:
         msg = (
             f"Trip sync done: {total_records} records across "
             f"{len(all_userids)} employees, {len(dates)} dates, "
-            f"{total_skipped} skipped{backfill_info}"
+            f"{total_skipped} skipped, {total_failures} failures, "
+            f"{dingtalk_client.request_counts().get('/topapi/attendance/getupdatedata', 0) - request_start} requests{backfill_info}"
         )
-        await _finish_sync_log(log_id, "success", msg)
+        await _finish_sync_log(log_id, "failed" if total_failures else "success", msg)
+        if not total_failures and not force_month and recover_gap:
+            from app.services.events import mark_trip_coverage_complete
+            mark_trip_coverage_complete(coverage_epoch)
         logger.info(msg)
         return msg
 

@@ -10,3 +10,4 @@ aiosqlite==0.20.0
 chinese-calendar>=1.9.0
 PyJWT>=2.8.0
 APScheduler>=3.10.0
+dingtalk-stream==0.24.3

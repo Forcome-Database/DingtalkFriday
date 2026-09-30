@@ -1,7 +1,6 @@
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted, nextTick, toRef } from 'vue'
 import { useTripAnalyticsData } from '../composables/useTripAnalyticsData.js'
-import apiClient from '../api/index.js'
 
 import * as echarts from 'echarts/core'
 import { LineChart, PieChart, BarChart } from 'echarts/charts'
@@ -36,10 +35,11 @@ const {
   weekdayDistribution,
   employeeRanking,
   fetchAll,
+  fetchDepartmentComparison,
+  deptMetric,
 } = useTripAnalyticsData(toRef(props, 'year'))
 
 // --- Department metric toggle ---
-const deptMetric = ref('total')
 
 // --- Chart DOM refs ---
 const trendChartRef = ref(null)
@@ -76,6 +76,7 @@ function getTypeColor(typeName) {
 
 // --- 1. Monthly trend (dual lines: 出差 vs 外出) ---
 function renderTrendChart() {
+  if (!monthlyTrend.value) { trendChart?.clear(); return }
   if (!trendChartRef.value) return
   trendChart = ensureChartInstance(trendChart, trendChartRef)
 
@@ -136,6 +137,7 @@ function renderTrendChart() {
 
 // --- 2. Type distribution (donut: 出差 vs 外出) ---
 function renderPieChart() {
+  if (!typeDistribution.value) { pieChart?.clear(); return }
   if (!pieChartRef.value) return
   pieChart = ensureChartInstance(pieChart, pieChartRef)
 
@@ -173,6 +175,7 @@ function renderPieChart() {
 
 // --- 3. Department comparison (horizontal bar) ---
 function renderDeptChart() {
+  if (!departmentComparison.value) { deptChart?.clear(); return }
   if (!deptChartRef.value) return
   deptChart = ensureChartInstance(deptChart, deptChartRef)
 
@@ -183,7 +186,7 @@ function renderDeptChart() {
   const sorted = [...top].reverse()
   const depts = sorted.map(d => d.name)
   const values = sorted.map(d => d[sortKey])
-  const avg = values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0
+  const avg = raw.average ?? 0
 
   const chartHeight = Math.max(250, sorted.length * 32 + 60)
   deptChartRef.value.style.height = `${chartHeight}px`
@@ -228,6 +231,7 @@ function renderDeptChart() {
 
 // --- 4. Weekday distribution (vertical bar) ---
 function renderWeekdayChart() {
+  if (!weekdayDistribution.value) { weekdayChart?.clear(); return }
   if (!weekdayChartRef.value) return
   weekdayChart = ensureChartInstance(weekdayChart, weekdayChartRef)
 
@@ -271,6 +275,7 @@ function renderWeekdayChart() {
 
 // --- 5. Employee ranking (stacked horizontal bar) ---
 function renderRankingChart() {
+  if (!employeeRanking.value) { rankingChart?.clear(); return }
   if (!rankingChartRef.value) return
   rankingChart = ensureChartInstance(rankingChart, rankingChartRef)
 
@@ -357,12 +362,7 @@ function handleResize() {
 }
 
 async function handleDeptMetricChange(metric) {
-  deptMetric.value = metric
-  try {
-    departmentComparison.value = await apiClient.getTripDepartmentComparison(props.year, metric)
-  } catch (err) {
-    console.error('[TripAnalytics] Failed to refresh department comparison:', err)
-  }
+  await fetchDepartmentComparison(metric)
 }
 
 // --- Watchers ---

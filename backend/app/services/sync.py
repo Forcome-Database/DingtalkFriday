@@ -1,541 +1,419 @@
-"""
-Data synchronization service.
+"""Complete, atomic organization and leave snapshots from DingTalk."""
 
-Syncs departments, employees, leave types, and leave records
-from DingTalk APIs into the local SQLite database.
-"""
-
+import asyncio
 import logging
-from datetime import datetime, timezone
-from typing import List, Optional
+from collections import defaultdict, deque
+from datetime import datetime, timedelta, timezone
+from typing import Optional
+from uuid import uuid4
+from zoneinfo import ZoneInfo
 
-from sqlalchemy import select, delete
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
+from app.config import settings
 from app.database import async_session
-from app.models import Department, Employee, LeaveRecord, LeaveType, SyncLog
+from app.dingtalk import attendance as att_api
 from app.dingtalk import department as dept_api
 from app.dingtalk import user as user_api
-from app.dingtalk import attendance as att_api
-from app.config import settings
+from app.models import Department, Employee, LeaveRecord, LeaveType, SyncLog
 
 logger = logging.getLogger(__name__)
+_SHANGHAI = ZoneInfo("Asia/Shanghai")
+_full_sync_lock = asyncio.Lock()
+_organization_sync_lock = asyncio.Lock()
+_leave_sync_lock = asyncio.Lock()
+_full_sync_tasks: dict[int, asyncio.Task] = {}
 
 
-# ---------------------------------------------------------------------------
-# Helper: sync log management
-# ---------------------------------------------------------------------------
-
-async def _create_sync_log(sync_type: str) -> int:
-    """Create a 'running' sync log entry and return its ID."""
+async def _create_sync_log(sync_type: str, task_id: Optional[str] = None) -> int:
     async with async_session() as session:
-        log = SyncLog(
-            sync_type=sync_type,
-            status="running",
-            started_at=datetime.now(timezone.utc),
-        )
+        log = SyncLog(sync_type=sync_type, task_id=task_id, status="running", started_at=datetime.now(timezone.utc))
         session.add(log)
         await session.commit()
-        await session.refresh(log)
         return log.id
 
 
+async def _write_sync_log(session, log_id: int, status: str, message: str) -> None:
+    await session.execute(update(SyncLog).where(SyncLog.id == log_id).values(
+        status=status, message=message, finished_at=datetime.now(timezone.utc)
+    ))
+
+
 async def _finish_sync_log(log_id: int, status: str, message: str = "") -> None:
-    """Mark a sync log entry as finished."""
     async with async_session() as session:
-        result = await session.execute(select(SyncLog).where(SyncLog.id == log_id))
-        log = result.scalar_one_or_none()
-        if log:
-            log.status = status
-            log.message = message
-            log.finished_at = datetime.now(timezone.utc)
-            await session.commit()
+        await _write_sync_log(session, log_id, status, message)
+        await session.commit()
 
 
-# ---------------------------------------------------------------------------
-# Department sync
-# ---------------------------------------------------------------------------
-
-async def sync_departments() -> str:
-    """
-    Recursively sync all departments starting from root (dept_id=1).
-    Returns a summary message.
-    """
+async def _sync_departments_impl() -> str:
     log_id = await _create_sync_log("department")
     try:
-        count = 0
-
-        # Store the root department itself (BFS only stores children)
-        root_info = await dept_api.get_department(settings.root_dept_id)
-        async with async_session() as session:
-            stmt = sqlite_insert(Department).values(
-                dept_id=root_info["dept_id"],
-                name=root_info["name"],
-                parent_id=root_info["parent_id"],
-                updated_at=datetime.now(timezone.utc),
-            ).on_conflict_do_update(
-                index_elements=["dept_id"],
-                set_={
-                    "name": root_info["name"],
-                    "parent_id": root_info["parent_id"],
-                    "updated_at": datetime.now(timezone.utc),
-                },
-            )
-            await session.execute(stmt)
-            await session.commit()
-        count += 1
-
-        # BFS traversal of department tree
-        queue: List[int] = [settings.root_dept_id]
-        visited: set = set()
-
+        root = await dept_api.get_department(settings.root_dept_id)
+        snapshot = {root["dept_id"]: root}
+        queue = deque([settings.root_dept_id])
+        visited = set()
         while queue:
-            parent_id = queue.pop(0)
+            parent_id = queue.popleft()
             if parent_id in visited:
                 continue
             visited.add(parent_id)
+            for department in await dept_api.get_sub_departments(parent_id):
+                did = department["dept_id"]
+                if did in snapshot:
+                    raise ValueError("Repeated or cyclic department in DingTalk snapshot")
+                snapshot[did] = department
+                queue.append(did)
 
-            sub_depts = await dept_api.get_sub_departments(parent_id)
-            for dept in sub_depts:
-                async with async_session() as session:
-                    stmt = sqlite_insert(Department).values(
-                        dept_id=dept["dept_id"],
-                        name=dept["name"],
-                        parent_id=dept["parent_id"],
-                        updated_at=datetime.now(timezone.utc),
-                    ).on_conflict_do_update(
-                        index_elements=["dept_id"],
-                        set_={
-                            "name": dept["name"],
-                            "parent_id": dept["parent_id"],
-                            "updated_at": datetime.now(timezone.utc),
-                        },
-                    )
-                    await session.execute(stmt)
-                    await session.commit()
-                count += 1
-                queue.append(dept["dept_id"])
-
-        msg = f"Synced {count} departments"
-        await _finish_sync_log(log_id, "success", msg)
-        logger.info(msg)
-        return msg
-    except Exception as e:
-        msg = f"Department sync failed: {e}"
-        await _finish_sync_log(log_id, "failed", msg)
-        logger.exception(msg)
+        now = datetime.now(timezone.utc)
+        message = f"Synced {len(snapshot)} active departments; historical departments retained"
+        async with async_session() as session:
+            async with session.begin():
+                await session.execute(update(Department).values(is_active=False))
+                for department in snapshot.values():
+                    values = dict(department, is_active=True, updated_at=now)
+                    stmt = sqlite_insert(Department).values(**values)
+                    await session.execute(stmt.on_conflict_do_update(
+                        index_elements=["dept_id"], set_=values
+                    ))
+                await _write_sync_log(session, log_id, "success", message)
+        return message
+    except Exception as exc:
+        await _finish_sync_log(log_id, "failed", f"Department sync failed: {exc}")
         raise
 
 
-# ---------------------------------------------------------------------------
-# Employee sync
-# ---------------------------------------------------------------------------
-
-async def sync_employees(dept_id: Optional[int] = None) -> str:
-    """
-    Sync employees for the given department, or all departments if None.
-    Returns a summary message.
-    """
+async def _sync_employees_impl(dept_id: Optional[int] = None) -> str:
     log_id = await _create_sync_log("employee")
     try:
-        count = 0
-
-        # Determine which departments to sync
+        async with async_session() as session:
+            departments = (await session.execute(select(Department).where(
+                Department.is_active.is_(True)
+            ))).scalars().all()
+            previous = dict((await session.execute(select(Employee.userid, Employee.dept_id))).all())
+        department_map = {department.dept_id: department.name for department in departments}
         if dept_id is not None:
-            dept_ids = [dept_id]
-        else:
-            async with async_session() as session:
-                result = await session.execute(select(Department.dept_id))
-                dept_ids = [row[0] for row in result.fetchall()]
+            if dept_id not in department_map:
+                raise ValueError("Cannot sync an inactive or unknown department")
+            department_map = {dept_id: department_map[dept_id]}
+        if not department_map:
+            raise ValueError("No complete active department snapshot available")
 
-            # Always include root_dept_id so users placed directly
-            # under the root department (not in any sub-department)
-            # are not missed.
-            if settings.root_dept_id not in dept_ids:
-                dept_ids.insert(0, settings.root_dept_id)
+        memberships = defaultdict(list)
+        for did in sorted(department_map):
+            for user in await user_api.get_user_list_simple(did):
+                memberships[user["userid"]].append((did, user["name"]))
 
-        for did in dept_ids:
-            users = await user_api.get_user_list_simple(did)
-
-            # Resolve department name from local DB
-            dept_name = None
-            async with async_session() as session:
-                result = await session.execute(
-                    select(Department.name).where(Department.dept_id == did)
-                )
-                row = result.scalar_one_or_none()
-                if row:
-                    dept_name = row
-
-            for user in users:
-                async with async_session() as session:
-                    stmt = sqlite_insert(Employee).values(
-                        userid=user["userid"],
-                        name=user["name"],
-                        dept_id=did,
-                        dept_name=dept_name,
-                        updated_at=datetime.now(timezone.utc),
-                    ).on_conflict_do_update(
-                        index_elements=["userid"],
-                        set_={
-                            "name": user["name"],
-                            "dept_id": did,
-                            "dept_name": dept_name,
-                            "updated_at": datetime.now(timezone.utc),
-                        },
-                    )
-                    await session.execute(stmt)
-                    await session.commit()
-                count += 1
-
-        msg = f"Synced {count} employees across {len(dept_ids)} departments"
-        await _finish_sync_log(log_id, "success", msg)
-        logger.info(msg)
-        return msg
-    except Exception as e:
-        msg = f"Employee sync failed: {e}"
-        await _finish_sync_log(log_id, "failed", msg)
-        logger.exception(msg)
+        now = datetime.now(timezone.utc)
+        message = f"Synced {len(memberships)} active employees across {len(department_map)} departments"
+        async with async_session() as session:
+            async with session.begin():
+                inactive = update(Employee)
+                if dept_id is not None:
+                    inactive = inactive.where(Employee.dept_id == dept_id)
+                await session.execute(inactive.values(is_active=False))
+                for userid, departments_for_user in memberships.items():
+                    chosen = next((entry for entry in departments_for_user if entry[0] == previous.get(userid)),
+                                  departments_for_user[0])
+                    values = dict(userid=userid, name=chosen[1], dept_id=chosen[0],
+                                  dept_name=department_map[chosen[0]], is_active=True, updated_at=now)
+                    stmt = sqlite_insert(Employee).values(**values)
+                    await session.execute(stmt.on_conflict_do_update(index_elements=["userid"], set_=values))
+                await _write_sync_log(session, log_id, "success", message)
+        return message
+    except Exception as exc:
+        await _finish_sync_log(log_id, "failed", f"Employee sync failed: {exc}")
         raise
 
 
-# ---------------------------------------------------------------------------
-# Leave type sync
-# ---------------------------------------------------------------------------
+async def sync_departments() -> str:
+    async with _organization_sync_lock:
+        return await _sync_departments_impl()
+
+
+async def sync_employees(dept_id: Optional[int] = None) -> str:
+    async with _organization_sync_lock:
+        return await _sync_employees_impl(dept_id)
+
 
 async def sync_leave_types() -> str:
-    """
-    Sync leave (vacation) types from DingTalk.
-    Returns a summary message.
-    """
     log_id = await _create_sync_log("leave_type")
     try:
-        # Build candidate userid list: configured admin first, then from DB
-        candidates = []
-        if settings.admin_userid:
-            candidates.append(settings.admin_userid)
-
+        candidates = [settings.admin_userid] if settings.admin_userid else []
         async with async_session() as session:
-            result = await session.execute(select(Employee.userid).limit(5))
-            for row in result.scalars():
-                if row not in candidates:
-                    candidates.append(row)
-
+            for userid in (await session.execute(select(Employee.userid).where(
+                Employee.is_active.is_(True)
+            ).limit(5))).scalars():
+                if userid not in candidates:
+                    candidates.append(userid)
         if not candidates:
-            msg = "No op_userid available, skipping leave type sync"
-            await _finish_sync_log(log_id, "failed", msg)
-            return msg
-
-        # Try each candidate until one succeeds
+            raise ValueError("No operator available for vacation type sync")
         types = None
-        for op_userid in candidates:
+        for operator in candidates:
             try:
-                types = await att_api.get_vacation_type_list(op_userid)
+                types = await att_api.get_vacation_type_list(operator)
                 break
-            except Exception as e:
-                logger.warning("get_vacation_type_list failed with userid=%s: %s", op_userid, e)
-                continue
-
-        if types is None:
-            msg = f"All {len(candidates)} userid candidates failed for get_vacation_type_list"
-            await _finish_sync_log(log_id, "failed", msg)
-            return msg
-        count = 0
-        for t in types:
-            async with async_session() as session:
-                stmt = sqlite_insert(LeaveType).values(
-                    leave_code=t["leave_code"],
-                    leave_name=t["leave_name"],
-                    leave_view_unit=t.get("leave_view_unit"),
-                    hours_in_per_day=t.get("hours_in_per_day", 800),
-                    updated_at=datetime.now(timezone.utc),
-                ).on_conflict_do_update(
-                    index_elements=["leave_code"],
-                    set_={
-                        "leave_name": t["leave_name"],
-                        "leave_view_unit": t.get("leave_view_unit"),
-                        "hours_in_per_day": t.get("hours_in_per_day", 800),
-                        "updated_at": datetime.now(timezone.utc),
-                    },
-                )
-                await session.execute(stmt)
-                await session.commit()
-            count += 1
-
-        msg = f"Synced {count} leave types"
-        await _finish_sync_log(log_id, "success", msg)
-        logger.info(msg)
-        return msg
-    except Exception as e:
-        msg = f"Leave type sync failed: {e}"
-        await _finish_sync_log(log_id, "failed", msg)
-        logger.exception(msg)
+            except Exception as exc:
+                logger.warning("Vacation type operator failed: %s", exc)
+        if not types:
+            raise ValueError("No complete vacation type snapshot obtained")
+        now = datetime.now(timezone.utc)
+        message = f"Synced {len(types)} leave types"
+        async with async_session() as session:
+            async with session.begin():
+                for leave_type in types:
+                    values = dict(leave_code=leave_type["leave_code"], leave_name=leave_type["leave_name"],
+                                  leave_view_unit=leave_type.get("leave_view_unit"),
+                                  hours_in_per_day=leave_type.get("hours_in_per_day", 800), updated_at=now)
+                    stmt = sqlite_insert(LeaveType).values(**values)
+                    await session.execute(stmt.on_conflict_do_update(index_elements=["leave_code"], set_=values))
+                await _write_sync_log(session, log_id, "success", message)
+        return message
+    except Exception as exc:
+        await _finish_sync_log(log_id, "failed", f"Leave type sync failed: {exc}")
         raise
 
 
-# ---------------------------------------------------------------------------
-# Leave record sync
-# ---------------------------------------------------------------------------
-
 def _year_time_chunks(year: int, max_days: int = 180) -> list:
-    """
-    Split a full year into (start_ms, end_ms) chunks, each at most
-    *max_days* days long, to respect DingTalk's 180-day query limit.
-    """
-    from datetime import datetime as dt, timedelta
-
-    year_start = dt(year, 1, 1)
-    year_end = dt(year, 12, 31, 23, 59, 59)
-
+    if not 1 <= max_days <= 180:
+        raise ValueError("Leave chunks must contain 1-180 days")
+    start = datetime(year, 1, 1, tzinfo=_SHANGHAI)
+    end = datetime(year + 1, 1, 1, tzinfo=_SHANGHAI)
     chunks = []
-    chunk_start = year_start
-    while chunk_start <= year_end:
-        chunk_end_date = chunk_start + timedelta(days=max_days - 1)
-        chunk_end = dt(
-            chunk_end_date.year, chunk_end_date.month, chunk_end_date.day,
-            23, 59, 59,
-        )
-        if chunk_end > year_end:
-            chunk_end = year_end
-        chunks.append((
-            int(chunk_start.timestamp() * 1000),
-            int(chunk_end.timestamp() * 1000),
-        ))
-        chunk_start = chunk_end.replace(hour=0, minute=0, second=0) + timedelta(days=1)
-
+    while start < end:
+        next_start = min(start + timedelta(days=max_days), end)
+        chunks.append((int(start.timestamp() * 1000), int(next_start.timestamp() * 1000) - 1))
+        start = next_start
     return chunks
 
 
-async def sync_leave_records(year: int) -> str:
-    """
-    Sync leave records using the vacation record list API.
-    This API returns leave_code per record, enabling leave-type filtering.
+def _matching_vacations(record: dict, vacations: list) -> list:
+    matching = []
+    for vacation in vacations:
+        if vacation.get("start_time") is None or vacation.get("end_time") is None:
+            continue
+        start, end = int(vacation["start_time"]), int(vacation["end_time"])
+        if start <= record["start_time"] and end >= record["end_time"]:
+            matching.append(vacation)
+    exact = [item for item in matching if int(item["start_time"]) == record["start_time"]
+             and int(item["end_time"]) == record["end_time"]]
+    return exact or matching
 
-    Strategy: iterate over each leave type, query all employees' records
-    for that type, then upsert into DB with leave_code and leave_type.
-    """
-    log_id = await _create_sync_log("leave_record")
+
+def _confirmation(record: dict, matching: list) -> tuple[str, Optional[str]]:
+    if record["duration_percent"] <= 0:
+        return "待复核", "Attendance status reports zero leave duration"
+    if record.get("leave_status") not in (None, "success"):
+        return "待复核", f"Attendance status is {record['leave_status']}"
+    if not matching:
+        return "待复核", "Attendance status has no matching vacation consumption record"
+    if any(item.get("leave_status") == "revoke" for item in matching):
+        return "待复核", "Approved vacation revocation conflicts with attendance status"
+    if any(item.get("cal_type") is not None for item in matching):
+        return "待复核", "Vacation reversal conflicts with attendance status"
+    if any(item.get("leave_record_type") not in (None, "leave") for item in matching):
+        return "待复核", "Vacation record type conflicts with leave consumption"
+    states = {item.get("leave_status") for item in matching}
+    if states == {"success"}:
+        return "已审批", None
+    note = "Vacation status conflicts with attendance: " + ",".join(sorted(str(state) for state in states))
+    if not states <= {"init", "success", "refuse", "abort"}:
+        return "待复核", note
+    if any(not item.get("record_id") for item in matching):
+        return "待复核", note + "; missing consumption record ID"
+    # A consumption ID identifies a ledger record, not an approval instance.
+    states_by_record = defaultdict(set)
+    for item in matching:
+        states_by_record[item["record_id"]].add(item["leave_status"])
+    for record_states in states_by_record.values():
+        if len(record_states) != 1:
+            return "待复核", "Vacation status conflicts for one consumption record: " + ",".join(sorted(record_states))
+    if any(record_states == {"success"} for record_states in states_by_record.values()):
+        return "已审批", None
+    return "待复核", note
+
+
+async def _sync_leave_records_impl(year: int, selected_userids: Optional[list[str]] = None) -> str:
+    log_id = await _create_sync_log("leave_record" if selected_userids is None else "leave_record_incremental")
+    request_start = att_api.dingtalk_client.request_counts()
     try:
-        # Get op_userid
-        op_userid = settings.admin_userid
-        if not op_userid:
-            async with async_session() as session:
-                result = await session.execute(select(Employee.userid).limit(1))
-                op_userid = result.scalar_one_or_none()
-        if not op_userid:
-            msg = "No op_userid available, skipping leave record sync"
-            await _finish_sync_log(log_id, "failed", msg)
-            return msg
-
-        # Gather all employee userids
+        chunks = _year_time_chunks(year)
+        year_start, year_end = chunks[0][0], chunks[-1][1]
         async with async_session() as session:
-            result = await session.execute(select(Employee.userid))
-            all_userids = [row[0] for row in result.fetchall()]
+            userids = sorted((await session.execute(select(Employee.userid))).scalars().all())
+            all_types = (await session.execute(select(LeaveType))).scalars().all()
+            pending_pairs = set((await session.execute(select(LeaveRecord.userid, LeaveRecord.leave_code).where(
+                LeaveRecord.status == "待复核"
+            ))).all())
+        if selected_userids is not None:
+            if not selected_userids or any(userid not in userids for userid in selected_userids):
+                raise ValueError("Incremental leave refresh requires known employee IDs")
+            userids = sorted(set(selected_userids))
+        if not userids or not all_types:
+            raise ValueError("Employees and vacation types must be synced before leave records")
+        all_type_map = {leave_type.leave_code: leave_type for leave_type in all_types}
+        allowed_names = {name.strip() for name in settings.leave_type_names.split(",") if name.strip()}
+        type_map = {code: leave_type for code, leave_type in all_type_map.items()
+                    if not allowed_names or leave_type.leave_name in allowed_names}
+        if not type_map:
+            raise ValueError("No supported vacation type matches the configured names")
 
-        if not all_userids:
-            msg = "No employees found, skipping leave record sync"
-            await _finish_sync_log(log_id, "failed", msg)
-            return msg
+        # No inventory mutation occurs until every source page has succeeded.
+        status_snapshot = {}
+        for offset in range(0, len(userids), 100):
+            for start, end in chunks:
+                for record in await att_api.get_leave_status(userids[offset:offset + 100], start, end):
+                    if record["end_time"] < year_start or record["start_time"] > year_end:
+                        continue
+                    code = record.get("leave_code")
+                    if code in all_type_map and code not in type_map:
+                        continue
+                    key = (record["userid"], record["start_time"], record["end_time"], code)
+                    previous = status_snapshot.get(key)
+                    if previous is not None and previous != record:
+                        raise ValueError("Conflicting leave status rows in the same snapshot")
+                    status_snapshot[key] = record
 
-        # Get leave types to iterate
+        verify_all = getattr(settings, "leave_sync_verify_vacation", True)
+        query_users = defaultdict(set)
+        for record in status_snapshot.values():
+            userid, code = record["userid"], record.get("leave_code")
+            if code not in type_map:
+                for supported_code in type_map:
+                    query_users[supported_code].add(userid)
+            elif verify_all or (userid, code) in pending_pairs or record.get("leave_status") not in (None, "success"):
+                query_users[code].add(userid)
+        operator = settings.admin_userid or (userids[0] if userids else None)
+        vacation_lookup = defaultdict(list)
+        for code, affected_users in query_users.items():
+            ordered_users = sorted(affected_users)
+            for offset in range(0, len(ordered_users), 50):
+                records = await att_api.get_vacation_record_list(operator, code, ordered_users[offset:offset + 50])
+                for record in records:
+                    vacation_lookup[(code, record["userid"])].append(record)
+
+        values_by_key = {}
+        now = datetime.now(timezone.utc)
+        for record in status_snapshot.values():
+            userid, code = record["userid"], record.get("leave_code")
+            if code not in type_map:
+                possible = {candidate: _matching_vacations(record, vacation_lookup[(candidate, userid)])
+                            for candidate in type_map}
+                possible = {candidate: items for candidate, items in possible.items() if items}
+                if len(possible) != 1:
+                    raise ValueError("Missing or unknown leave_code could not be resolved unambiguously")
+                code, matching = next(iter(possible.items()))
+                approval_status, note = _confirmation(record, matching)
+                source = "attendance+vacation"
+            elif userid in query_users.get(code, set()):
+                matching = _matching_vacations(record, vacation_lookup[(code, userid)])
+                approval_status, note = _confirmation(record, matching)
+                source = "attendance+vacation"
+            else:
+                approval_status = "已审批" if record["duration_percent"] > 0 else "待复核"
+                note = None if approval_status == "已审批" else "Attendance status reports zero leave duration"
+                source = "attendance"
+            key = (userid, record["start_time"], record["end_time"], code)
+            values = dict(userid=userid, start_time=record["start_time"], end_time=record["end_time"],
+                          duration_percent=record["duration_percent"], duration_unit=record["duration_unit"],
+                          leave_code=code, leave_type=type_map[code].leave_name,
+                          status=approval_status, source=source, sync_note=note,
+                          last_synced_at=now, created_at=now)
+            if key in values_by_key and values_by_key[key] != values:
+                raise ValueError("Conflicting leave rows after type resolution")
+            values_by_key[key] = values
+
+        pending_count = sum(value["status"] == "待复核" for value in values_by_key.values())
+        approved_count = len(values_by_key) - pending_count
+        request_end = att_api.dingtalk_client.request_counts()
+        requests = sum(request_end.get(path, 0) - request_start.get(path, 0) for path in (
+            "/topapi/attendance/getleavestatus", "/topapi/attendance/vacation/record/list",
+        ))
+        scope = "full" if selected_userids is None else "incremental"
+        message = (f"Synced {approved_count} confirmed leave records, {pending_count} pending review, year={year}, "
+                   f"scope={scope}, employees={len(userids)}, requests={requests}")
         async with async_session() as session:
-            result = await session.execute(select(LeaveType))
-            leave_types = result.scalars().all()
-
-        if not leave_types:
-            msg = "No leave types found, skipping leave record sync"
-            await _finish_sync_log(log_id, "failed", msg)
-            return msg
-
-        # Filter leave types by whitelist if configured
-        allowed_names = []
-        if settings.leave_type_names:
-            allowed_names = [n.strip() for n in settings.leave_type_names.split(",") if n.strip()]
-        if allowed_names:
-            leave_types = [lt for lt in leave_types if lt.leave_name in allowed_names]
-
-        year_start_ms = int(datetime(year, 1, 1).timestamp() * 1000)
-        year_end_ms = int(datetime(year, 12, 31, 23, 59, 59).timestamp() * 1000)
-        count = 0
-
-        # Build a whitelist of genuinely active leaves using getleavestatus.
-        # This API only returns leaves that are currently approved/active,
-        # unlike vacation/record/list which may still show revoked leaves
-        # with leave_status=success.
-        active_leaves: set = set()
-        time_chunks = _year_time_chunks(year)
-        for i in range(0, len(all_userids), 100):
-            batch_100 = all_userids[i : i + 100]
-            for chunk_start, chunk_end in time_chunks:
-                try:
-                    leave_recs = await att_api.get_leave_status(
-                        userid_list=batch_100,
-                        start_time=chunk_start,
-                        end_time=chunk_end,
-                    )
-                    for lr in leave_recs:
-                        uid = lr.get("userid")
-                        st = lr.get("start_time")
-                        et = lr.get("end_time")
-                        if uid and st and et:
-                            active_leaves.add((uid, st, et))
-                except Exception as e:
-                    logger.warning("Failed to fetch leave status: %s", e)
-
-        logger.info(
-            "Built active leave whitelist: %d entries for %d users",
-            len(active_leaves), len(all_userids),
-        )
-
-        # Clear old records for this year before re-syncing
-        async with async_session() as session:
-            await session.execute(
-                delete(LeaveRecord).where(
-                    LeaveRecord.start_time >= year_start_ms,
-                    LeaveRecord.start_time <= year_end_ms,
-                )
-            )
-            await session.commit()
-
-        # For each leave type, query all employees' records
-        for lt in leave_types:
-            leave_code = lt.leave_code
-            leave_name = lt.leave_name
-            hpd = lt.hours_in_per_day or 800
-            view_unit = lt.leave_view_unit or "day"
-
-            # API accepts comma-separated userids (no documented limit,
-            # but let's batch at 50 to be safe with response size)
-            batch_size = 50
-            for i in range(0, len(all_userids), batch_size):
-                batch = all_userids[i : i + batch_size]
-
-                try:
-                    records = await att_api.get_vacation_record_list(
-                        op_userid=op_userid,
-                        leave_code=leave_code,
-                        userids=batch,
-                    )
-                except Exception as e:
-                    logger.warning(
-                        "Failed to fetch vacation records for leave_code=%s: %s",
-                        leave_code, e,
-                    )
-                    continue
-
-                # Separate normal consumption (cal_type=null) from
-                # reversals (cal_type!=null, e.g. approval revoked).
-                # Build a set of reversed keys so we can skip them.
-                reversed_keys: set = set()
-                for rec in records:
-                    if rec.get("cal_type") is not None:
-                        st = rec.get("start_time")
-                        et = rec.get("end_time")
-                        if st and et:
-                            reversed_keys.add((rec["userid"], st, et))
-
-                for rec in records:
-                    if rec.get("cal_type") is not None:
-                        continue
-
-                    st = rec.get("start_time")
-                    et = rec.get("end_time")
-                    if not st or not et:
-                        continue
-                    # Filter to target year
-                    if st < year_start_ms or st > year_end_ms:
-                        continue
-
-                    # Skip records that have been reversed (leave revoked)
-                    if (rec["userid"], st, et) in reversed_keys:
-                        continue
-
-                    # Skip records not confirmed by getleavestatus
-                    if active_leaves and (rec["userid"], st, et) not in active_leaves:
-                        logger.debug(
-                            "Skipping unconfirmed leave: user=%s, %d-%d",
-                            rec["userid"], st, et,
-                        )
-                        continue
-
-                    # Convert record_num to duration_percent / duration_unit
-                    if view_unit == "hour" and rec.get("record_num_per_hour") is not None:
-                        duration_percent = abs(rec["record_num_per_hour"])
-                        duration_unit = "percent_hour"
-                    elif rec.get("record_num_per_day") is not None:
-                        duration_percent = abs(rec["record_num_per_day"])
-                        duration_unit = "percent_day"
-                    elif rec.get("record_num_per_hour") is not None:
-                        duration_percent = abs(rec["record_num_per_hour"])
-                        duration_unit = "percent_hour"
-                    else:
-                        continue
-
-                    async with async_session() as session:
-                        stmt = sqlite_insert(LeaveRecord).values(
-                            userid=rec["userid"],
-                            start_time=st,
-                            end_time=et,
-                            duration_percent=duration_percent,
-                            duration_unit=duration_unit,
-                            leave_type=leave_name,
-                            leave_code=leave_code,
-                            status="已审批",
-                            created_at=datetime.now(timezone.utc),
-                        ).on_conflict_do_update(
-                            index_elements=["userid", "start_time", "end_time"],
-                            set_={
-                                "duration_percent": duration_percent,
-                                "duration_unit": duration_unit,
-                                "leave_type": leave_name,
-                                "leave_code": leave_code,
-                            },
-                        )
-                        await session.execute(stmt)
-                        await session.commit()
-                    count += 1
-
-        msg = f"Synced {count} leave records for {len(all_userids)} employees, year={year}"
-        await _finish_sync_log(log_id, "success", msg)
-        logger.info(msg)
-        return msg
-    except Exception as e:
-        msg = f"Leave record sync failed: {e}"
-        await _finish_sync_log(log_id, "failed", msg)
-        logger.exception(msg)
+            async with session.begin():
+                await session.execute(delete(LeaveRecord).where(
+                    LeaveRecord.start_time <= year_end, LeaveRecord.end_time >= year_start,
+                    LeaveRecord.userid.in_(userids),
+                    or_(LeaveRecord.leave_code.in_(type_map),
+                        LeaveRecord.leave_type.in_([leave_type.leave_name for leave_type in type_map.values()])),
+                ))
+                if values_by_key:
+                    await session.execute(sqlite_insert(LeaveRecord), list(values_by_key.values()))
+                await _write_sync_log(session, log_id, "success", message)
+        if pending_count:
+            logger.warning(message)
+        return message
+    except Exception as exc:
+        await _finish_sync_log(log_id, "failed", f"Leave sync failed; previous records retained: {exc}")
         raise
 
 
-# ---------------------------------------------------------------------------
-# Full sync
-# ---------------------------------------------------------------------------
+async def sync_leave_records(year: int, userids: Optional[list[str]] = None) -> str:
+    async with _leave_sync_lock:
+        return await _sync_leave_records_impl(year, userids)
+
+
+async def refresh_leave_records(userid: str, year: int) -> str:
+    return await sync_leave_records(year, [userid])
+
+
+def is_leave_sync_running() -> bool:
+    return _leave_sync_lock.locked()
+
+
+def is_full_sync_running() -> bool:
+    return any(not task.done() for task in _full_sync_tasks.values())
+
+
+def _sync_year(year: Optional[int]) -> int:
+    return datetime.now(_SHANGHAI).year if year is None else year
+
+
+def _get_full_sync_task(year: Optional[int]) -> tuple[asyncio.Task, bool]:
+    target_year = _sync_year(year)
+    task = _full_sync_tasks.get(target_year)
+    if task is not None and not task.done():
+        return task, False
+    task = asyncio.create_task(_run_full_sync(target_year), name=f"full:{uuid4()}")
+    _full_sync_tasks[target_year] = task
+
+    def completed(completed_task: asyncio.Task) -> None:
+        if _full_sync_tasks.get(target_year) is completed_task:
+            _full_sync_tasks.pop(target_year, None)
+        if not completed_task.cancelled():
+            completed_task.exception()
+
+    task.add_done_callback(completed)
+    return task, True
+
+
+def start_full_sync(year: Optional[int] = None) -> bool:
+    """Reserve a task immediately, merging overlapping requests for the same year."""
+    return _get_full_sync_task(year)[1]
+
+
+def full_sync_task_id(year: Optional[int] = None) -> Optional[str]:
+    task = _full_sync_tasks.get(_sync_year(year))
+    return task.get_name() if task is not None and not task.done() else None
+
+
+async def _run_full_sync(year: int) -> str:
+    log_id = await _create_sync_log("full", task_id=asyncio.current_task().get_name())
+    try:
+        async with _full_sync_lock:
+            messages = [await sync_departments(), await sync_employees(), await sync_leave_types(),
+                        await sync_leave_records(year)]
+        message = "; ".join(messages)
+        await _finish_sync_log(log_id, "success", message)
+        return message
+    except Exception as exc:
+        await _finish_sync_log(log_id, "failed", f"Full sync failed: {exc}")
+        raise
+
 
 async def full_sync(year: Optional[int] = None) -> str:
-    """
-    Execute all sync steps in order:
-    1. Departments
-    2. Employees
-    3. Leave types
-    4. Leave records
-    Returns a combined summary message.
-    """
-    if year is None:
-        year = datetime.now().year
-
-    log_id = await _create_sync_log("full")
-    try:
-        messages = []
-        messages.append(await sync_departments())
-        messages.append(await sync_employees())
-        messages.append(await sync_leave_types())
-        messages.append(await sync_leave_records(year))
-
-        combined = "; ".join(messages)
-        await _finish_sync_log(log_id, "success", combined)
-        logger.info("Full sync completed: %s", combined)
-        return combined
-    except Exception as e:
-        msg = f"Full sync failed: {e}"
-        await _finish_sync_log(log_id, "failed", msg)
-        logger.exception(msg)
-        raise
+    task, _ = _get_full_sync_task(year)
+    return await asyncio.shield(task)

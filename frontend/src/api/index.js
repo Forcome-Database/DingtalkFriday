@@ -6,6 +6,36 @@ const api = axios.create({
   timeout: 30000
 })
 
+function leaveTypesParam(types) {
+  return types == null ? undefined : types.join(',')
+}
+
+export async function waitForSyncCompletion(domain, baselineId, onStatus = () => {}, signal, taskId) {
+  while (true) {
+    signal?.throwIfAborted()
+    const status = await api.get('/sync/status', { signal, params: { taskId } })
+    onStatus(status)
+    if (taskId != null) {
+      const task = status.task
+      if (task?.task_id === taskId && ['success', 'failed', 'partial'].includes(task.status)) return task
+    } else {
+      const latest = status.latest?.[domain]
+      if (latest && (baselineId == null || latest.id > baselineId) && !status.running?.[domain]
+        && ['success', 'failed', 'partial'].includes(latest.status)) {
+        return latest
+      }
+    }
+    await new Promise((resolve, reject) => {
+      const abort = () => { clearTimeout(timer); reject(signal.reason) }
+      const timer = setTimeout(() => {
+        signal?.removeEventListener('abort', abort)
+        resolve()
+      }, 2000)
+      signal?.addEventListener('abort', abort, { once: true })
+    })
+  }
+}
+
 // Request interceptor: attach JWT token
 api.interceptors.request.use(
   (config) => {
@@ -131,7 +161,7 @@ export default {
       params: {
         year: params.year,
         deptId: params.deptId || undefined,
-        leaveTypes: params.leaveTypes?.length ? params.leaveTypes.join(',') : undefined,
+        leaveTypes: leaveTypesParam(params.leaveTypes),
         employeeName: params.employeeName || undefined,
         unit: params.unit,
         page: params.page,
@@ -145,9 +175,9 @@ export default {
   /**
    * Get daily leave detail for an employee in a specific month
    */
-  getDailyDetail(employeeId, year, month) {
+  getDailyDetail(employeeId, year, month, leaveTypes) {
     return api.get('/leave/daily-detail', {
-      params: { employeeId, year, month }
+      params: { employeeId, year, month, leaveTypes: leaveTypesParam(leaveTypes) }
     })
   },
 
@@ -160,7 +190,7 @@ export default {
         year: params.year,
         month: params.month,
         deptId: params.deptId || undefined,
-        leaveTypes: params.leaveTypes?.length ? params.leaveTypes.join(',') : undefined,
+        leaveTypes: leaveTypesParam(params.leaveTypes),
         employeeName: params.employeeName || undefined
       }
     })
@@ -173,7 +203,7 @@ export default {
     return api.get('/leave/today-detail', {
       params: {
         deptId: params.deptId || undefined,
-        leaveTypes: params.leaveTypes?.length ? params.leaveTypes.join(',') : undefined,
+        leaveTypes: leaveTypesParam(params.leaveTypes),
         employeeName: params.employeeName || undefined,
         date: params.date || undefined
       }
@@ -187,7 +217,7 @@ export default {
     return api.get('/leave/today-detail/export', {
       params: {
         deptId: params.deptId || undefined,
-        leaveTypes: params.leaveTypes?.length ? params.leaveTypes.join(',') : undefined,
+        leaveTypes: leaveTypesParam(params.leaveTypes),
         employeeName: params.employeeName || undefined,
         date: params.date || undefined
       },
@@ -202,7 +232,7 @@ export default {
     return api.post('/leave/export', {
       year: params.year,
       deptId: params.deptId || undefined,
-      leaveTypes: params.leaveTypes?.length ? params.leaveTypes : undefined,
+      leaveTypes: params.leaveTypes == null ? undefined : params.leaveTypes,
       employeeName: params.employeeName || undefined,
       unit: params.unit
     }, {
@@ -220,8 +250,8 @@ export default {
   /**
    * Query current sync status
    */
-  getSyncStatus() {
-    return api.get('/sync/status')
+  getSyncStatus(signal) {
+    return api.get('/sync/status', { signal })
   },
 
   // --- Analytics API ---
@@ -293,7 +323,7 @@ export default {
    */
   getTripDailyDetail(params) {
     return api.get('/trip/daily-detail', {
-      params: { employeeId: params.employeeId, year: params.year, month: params.month }
+      params: { employeeId: params.employeeId, year: params.year, month: params.month, tripType: params.tripType || undefined }
     })
   },
 

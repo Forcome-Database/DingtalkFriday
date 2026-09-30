@@ -91,9 +91,10 @@ function formatDate(dateStr) {
 }
 
 function formatDuration(hours) {
-  if (hours >= 8) return `全天 \u00B7 ${hours}小时`
-  if (hours >= 4) return `半天 \u00B7 ${hours}小时`
-  return `${hours}小时`
+  const displayHours = Number(hours.toFixed(2))
+  if (hours >= 8) return `全天 \u00B7 ${displayHours}小时`
+  if (hours >= 4) return `半天 \u00B7 ${displayHours}小时`
+  return `${displayHours}小时`
 }
 
 function getTypeColor(type) {

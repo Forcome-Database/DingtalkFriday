@@ -22,24 +22,43 @@ async def get_user_list_simple(dept_id: int) -> List[Dict[str, Any]]:
     users: List[Dict[str, Any]] = []
     cursor = 0
     size = 100
+    seen_cursors = {cursor}
+    seen_userids = set()
 
     while True:
         data = await dingtalk_client.post(
             "/topapi/user/listsimple",
             json_body={"dept_id": dept_id, "cursor": cursor, "size": size},
         )
-        result = data.get("result", {})
-        page_list = result.get("list", [])
+        result = data.get("result")
+        if not isinstance(result, dict) or not isinstance(result.get("list"), list):
+            raise ValueError("Malformed DingTalk user list page")
+        page_list = result["list"]
+        has_more = result.get("has_more")
+        if not isinstance(has_more, bool) or (has_more and not page_list):
+            raise ValueError("Malformed DingTalk user list pagination")
 
         for item in page_list:
+            if (
+                not isinstance(item, dict)
+                or not isinstance(item.get("userid"), str)
+                or not item["userid"]
+                or not item.get("name")
+                or item["userid"] in seen_userids
+            ):
+                raise ValueError("Malformed or repeated DingTalk user list record")
+            seen_userids.add(item["userid"])
             users.append({
                 "userid": item.get("userid"),
                 "name": item.get("name"),
             })
 
-        has_more = result.get("has_more", False)
         if has_more:
-            cursor = result.get("next_cursor", 0)
+            next_cursor = result.get("next_cursor")
+            if not isinstance(next_cursor, int) or next_cursor in seen_cursors:
+                raise ValueError("DingTalk user list cursor did not advance")
+            cursor = next_cursor
+            seen_cursors.add(cursor)
         else:
             break
 

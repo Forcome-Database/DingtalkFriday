@@ -7,6 +7,7 @@ GET /api/leave/types
 """
 
 import logging
+from datetime import date as date_type
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Query
@@ -52,7 +53,7 @@ async def monthly_summary(
     """
     # Parse comma-separated leave types
     leave_type_list: Optional[List[str]] = None
-    if leaveTypes:
+    if leaveTypes is not None:
         leave_type_list = [t.strip() for t in leaveTypes.split(",") if t.strip()]
 
     result = await get_monthly_summary(
@@ -74,6 +75,7 @@ async def daily_detail(
     employeeId: str = Query(..., description="Employee userid"),
     year: int = Query(..., description="Year"),
     month: int = Query(..., ge=1, le=12, description="Month (1-12)"),
+    leaveTypes: Optional[str] = Query(default=None, description="Comma-separated leave types; empty means none"),
     _user=Depends(get_current_user),
 ):
     """
@@ -83,6 +85,7 @@ async def daily_detail(
         employee_id=employeeId,
         year=year,
         month=month,
+        leave_types=None if leaveTypes is None else [t.strip() for t in leaveTypes.split(",") if t.strip()],
     )
     return result
 
@@ -105,7 +108,7 @@ async def daily_leave_count(
     Get per-day leave headcount for a given month.
     """
     leave_type_list: Optional[List[str]] = None
-    if leaveTypes:
+    if leaveTypes is not None:
         leave_type_list = [t.strip() for t in leaveTypes.split(",") if t.strip()]
 
     result = await get_daily_leave_count(
@@ -128,7 +131,7 @@ async def today_detail(
     employeeName: Optional[str] = Query(
         default=None, description="Employee name keyword"
     ),
-    date: Optional[str] = Query(
+    date: Optional[date_type] = Query(
         default=None,
         description="Target date in YYYY-MM-DD format (defaults to today)",
     ),
@@ -137,24 +140,15 @@ async def today_detail(
     """
     Get detailed leave records for a specific date (defaults to today).
     """
-    from datetime import date as date_type
-
     leave_type_list: Optional[List[str]] = None
-    if leaveTypes:
+    if leaveTypes is not None:
         leave_type_list = [t.strip() for t in leaveTypes.split(",") if t.strip()]
-
-    target_date = None
-    if date:
-        try:
-            target_date = date_type.fromisoformat(date)
-        except ValueError:
-            pass
 
     result = await get_today_leave_detail(
         dept_id=deptId,
         leave_types=leave_type_list,
         employee_name=employeeName,
-        target_date=target_date,
+        target_date=date,
     )
     return result
 

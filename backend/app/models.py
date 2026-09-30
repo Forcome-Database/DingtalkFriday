@@ -5,7 +5,7 @@ SQLAlchemy ORM models for all database tables.
 from datetime import datetime
 
 from sqlalchemy import (
-    Column, DateTime, Float, Index, Integer, String, Text, UniqueConstraint,
+    Boolean, Column, DateTime, Float, Index, Integer, String, Text, UniqueConstraint,
 )
 
 from app.database import Base
@@ -18,6 +18,7 @@ class Department(Base):
     dept_id = Column(Integer, primary_key=True, comment="DingTalk department ID")
     name = Column(String, nullable=False, comment="Department name")
     parent_id = Column(Integer, nullable=True, comment="Parent department ID")
+    is_active = Column(Boolean, nullable=False, default=True, server_default="1")
     updated_at = Column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow,
         comment="Last update timestamp",
@@ -34,6 +35,7 @@ class Employee(Base):
     dept_name = Column(String, nullable=True, comment="Primary department name")
     avatar = Column(String, nullable=True, comment="Avatar URL")
     mobile = Column(String, nullable=True, comment="Mobile phone number")
+    is_active = Column(Boolean, nullable=False, default=True, server_default="1")
     updated_at = Column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow,
         comment="Last update timestamp",
@@ -59,10 +61,13 @@ class LeaveRecord(Base):
     leave_type = Column(String, default="请假", comment="Leave type name")
     leave_code = Column(String, nullable=True, comment="Leave type code")
     status = Column(String, default="已审批", comment="Approval status")
+    source = Column(String, nullable=True, comment="Source used to confirm the record")
+    sync_note = Column(Text, nullable=True, comment="Unresolved source disagreement")
+    last_synced_at = Column(DateTime, nullable=True, comment="Last complete source refresh")
     created_at = Column(DateTime, default=datetime.utcnow, comment="Record creation time")
 
     __table_args__ = (
-        UniqueConstraint("userid", "start_time", "end_time", name="uq_leave_record"),
+        UniqueConstraint("userid", "start_time", "end_time", "leave_code", name="uq_leave_record"),
     )
 
 
@@ -78,6 +83,8 @@ class TripRecord(Base):
     begin_time = Column(String, nullable=False, comment="Approval begin time")
     end_time = Column(String, nullable=False, comment="Approval end time")
     duration_hours = Column(Float, nullable=False, default=0, comment="Hours for this work_date (8=full day)")
+    source_duration = Column(Float, nullable=True, comment="Original approval duration")
+    source_duration_unit = Column(String, nullable=True, comment="Original approval duration unit")
     proc_inst_id = Column(String, nullable=False, comment="Approval instance ID")
     last_synced_at = Column(DateTime, nullable=False, comment="Last sync timestamp")
     created_at = Column(DateTime, default=datetime.utcnow, comment="Record creation time")
@@ -134,6 +141,7 @@ class SyncLog(Base):
     __tablename__ = "sync_log"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    task_id = Column(String, nullable=True, comment="Identifier of the owning background task")
     sync_type = Column(
         String, nullable=False,
         comment="Sync type: department / employee / leave_type / leave_record / full",

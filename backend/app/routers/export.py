@@ -54,28 +54,21 @@ async def export_today_detail(
     deptId: Optional[int] = Query(default=None),
     leaveTypes: Optional[str] = Query(default=None),
     employeeName: Optional[str] = Query(default=None),
-    date: Optional[str] = Query(default=None),
+    date: Optional[date_type] = Query(default=None),
     _user=Depends(get_current_user),
 ):
     """Export leave detail for a specific date as Excel."""
     from app.services.leave import get_today_leave_detail
 
     leave_type_list: Optional[List[str]] = None
-    if leaveTypes:
+    if leaveTypes is not None:
         leave_type_list = [t.strip() for t in leaveTypes.split(",") if t.strip()]
-
-    target_date = None
-    if date:
-        try:
-            target_date = date_type.fromisoformat(date)
-        except ValueError:
-            pass
 
     data = await get_today_leave_detail(
         dept_id=deptId,
         leave_types=leave_type_list,
         employee_name=employeeName,
-        target_date=target_date,
+        target_date=date,
     )
 
     output = export_leave_detail(data)

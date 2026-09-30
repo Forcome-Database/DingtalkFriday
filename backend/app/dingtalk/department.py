@@ -22,7 +22,9 @@ async def get_department(dept_id: int) -> Dict[str, Any]:
         "/topapi/v2/department/get",
         json_body={"dept_id": dept_id, "language": "zh_CN"},
     )
-    result = data.get("result", {})
+    result = data.get("result")
+    if not isinstance(result, dict) or result.get("dept_id") != dept_id or not result.get("name"):
+        raise ValueError("Malformed DingTalk department detail")
     return {
         "dept_id": result.get("dept_id"),
         "name": result.get("name", ""),
@@ -42,9 +44,19 @@ async def get_sub_departments(dept_id: int = 1) -> List[Dict[str, Any]]:
         "/topapi/v2/department/listsub",
         json_body={"dept_id": dept_id, "language": "zh_CN"},
     )
-    result = data.get("result", [])
+    result = data.get("result")
+    if not isinstance(result, list):
+        raise ValueError("Malformed DingTalk sub-department list")
     departments = []
     for item in result:
+        if (
+            not isinstance(item, dict)
+            or not isinstance(item.get("dept_id"), int)
+            or item["dept_id"] <= 0
+            or not item.get("name")
+            or item.get("parent_id") != dept_id
+        ):
+            raise ValueError("Malformed DingTalk sub-department")
         departments.append({
             "dept_id": item.get("dept_id"),
             "name": item.get("name"),

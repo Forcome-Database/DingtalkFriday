@@ -6,15 +6,15 @@ for business trip (出差) and out-of-office (外出) records.
 """
 
 import logging
-from datetime import date, datetime
-from typing import Dict, List, Optional, Set
+from datetime import date
+from typing import Dict, Optional
 
-from sqlalchemy import select, func, distinct, and_
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, func, distinct
 
 from app.database import async_session
-from app.models import Department, Employee, TripRecord
+from app.models import Employee, TripRecord
 from app.services.dept_utils import get_descendant_dept_ids
+from app.services.durations import business_today
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ async def get_trip_monthly_summary(
     async with async_session() as session:
         # Build employee filter
         emp_query = select(Employee)
-        if dept_id:
+        if dept_id is not None:
             dept_ids = await get_descendant_dept_ids(session, dept_id)
             emp_query = emp_query.where(Employee.dept_id.in_(dept_ids))
         if employee_name:
@@ -46,7 +46,7 @@ async def get_trip_monthly_summary(
 
         if not emp_ids:
             return {
-                "stats": {"totalCount": 0, "totalDays": 0, "todayTripCount": 0, "todayOutingCount": 0},
+                "stats": {"totalCount": 0, "totalDays": 0, "todayTripCount": 0, "todayOutingCount": 0, "todayTotalCount": 0},
                 "list": [],
                 "summary": {"tripDays": 0, "outingDays": 0, "totalDays": 0, "months": {}},
                 "pagination": {"page": page, "pageSize": page_size, "total": 0, "totalPages": 0},
@@ -61,6 +61,7 @@ async def get_trip_monthly_summary(
             TripRecord.userid.in_(emp_ids),
             TripRecord.work_date >= year_start,
             TripRecord.work_date <= year_end,
+            TripRecord.duration_hours > 0,
         )
         if trip_type:
             trip_query = trip_query.where(TripRecord.tag_name == trip_type)
@@ -95,7 +96,7 @@ async def get_trip_monthly_summary(
             else:
                 d["outingDays"] += days
                 d["outingProcs"].add(rec.proc_inst_id)
-            d["months"][month_key] = round(d["months"][month_key] + days, 1)
+            d["months"][month_key] += days
 
         # Build rows
         rows = []
@@ -123,20 +124,23 @@ async def get_trip_monthly_summary(
         summary_months = {str(m): 0.0 for m in range(1, 13)}
         total_trip = 0.0
         total_outing = 0.0
-        for r in rows:
-            total_trip += r["tripDays"]
-            total_outing += r["outingDays"]
-            for m, v in r["months"].items():
-                summary_months[m] = round(summary_months[m] + v, 1)
+        for d in emp_data.values():
+            total_trip += d["tripDays"]
+            total_outing += d["outingDays"]
+            for m, v in d["months"].items():
+                summary_months[m] += v
+        summary_months = {m: round(v, 1) for m, v in summary_months.items()}
 
         # Today stats
-        today_str = date.today().isoformat()
-        today_result = await session.execute(
-            select(TripRecord).where(
-                TripRecord.userid.in_(emp_ids),
-                TripRecord.work_date == today_str,
-            )
+        today_str = business_today().isoformat()
+        today_query = select(TripRecord).where(
+            TripRecord.userid.in_(emp_ids),
+            TripRecord.work_date == today_str,
+            TripRecord.duration_hours > 0,
         )
+        if trip_type:
+            today_query = today_query.where(TripRecord.tag_name == trip_type)
+        today_result = await session.execute(today_query)
         today_records = today_result.scalars().all()
         today_trip_users = set()
         today_outing_users = set()
@@ -148,9 +152,8 @@ async def get_trip_monthly_summary(
 
         # Total count: distinct proc_inst_id per user
         all_procs = set()
-        for d in emp_data.values():
-            all_procs.update(d["tripProcs"])
-            all_procs.update(d["outingProcs"])
+        for userid, d in emp_data.items():
+            all_procs.update((userid, proc) for proc in d["tripProcs"] | d["outingProcs"])
 
         # Pagination
         total = len(rows)
@@ -164,6 +167,7 @@ async def get_trip_monthly_summary(
                 "totalDays": round(total_trip + total_outing, 1),
                 "todayTripCount": len(today_trip_users),
                 "todayOutingCount": len(today_outing_users),
+                "todayTotalCount": len(today_trip_users | today_outing_users),
             },
             "list": page_rows,
             "summary": {
@@ -185,6 +189,7 @@ async def get_trip_daily_detail(
     employee_id: str,
     year: int,
     month: int,
+    trip_type: Optional[str] = None,
 ) -> dict:
     """Get daily trip records for one employee in a given month.
 
@@ -197,7 +202,7 @@ async def get_trip_daily_detail(
     """
     month_start = f"{year}-{month:02d}-01"
     if month == 12:
-        month_end = f"{year}-12-31"
+        month_end = f"{year + 1}-01-01"
     else:
         month_end = f"{year}-{month + 1:02d}-01"
 
@@ -208,13 +213,15 @@ async def get_trip_daily_detail(
         )
         emp = emp_result.scalar_one_or_none()
 
-        result = await session.execute(
-            select(TripRecord).where(
-                TripRecord.userid == employee_id,
-                TripRecord.work_date >= month_start,
-                TripRecord.work_date < month_end,
-            ).order_by(TripRecord.work_date)
+        query = select(TripRecord).where(
+            TripRecord.userid == employee_id,
+            TripRecord.work_date >= month_start,
+            TripRecord.work_date < month_end,
+            TripRecord.duration_hours > 0,
         )
+        if trip_type:
+            query = query.where(TripRecord.tag_name == trip_type)
+        result = await session.execute(query.order_by(TripRecord.work_date))
         records = result.scalars().all()
 
         total_hours = sum(r.duration_hours or 0 for r in records)
@@ -251,8 +258,8 @@ async def get_trip_daily_detail(
                 "date": r.work_date,
                 "startTime": start_display,
                 "endTime": end_display,
-                "hours": round(hrs, 1),
-                "durationHours": round(hrs, 1),
+                "hours": hrs,
+                "durationHours": hrs,
                 "leaveType": r.tag_name,
                 "tagName": r.tag_name,
                 "status": "已审批",
@@ -279,16 +286,17 @@ async def get_trip_today(
     target_date: Optional[date] = None,
 ) -> dict:
     """Get trip/outing records for a specific date (defaults to today)."""
-    today_str = (target_date or date.today()).isoformat()
+    today_str = (target_date or business_today()).isoformat()
 
     async with async_session() as session:
         query = (
             select(TripRecord, Employee)
             .join(Employee, TripRecord.userid == Employee.userid)
             .where(TripRecord.work_date == today_str)
+            .where(TripRecord.duration_hours > 0)
         )
 
-        if dept_id:
+        if dept_id is not None:
             dept_ids = await get_descendant_dept_ids(session, dept_id)
             query = query.where(Employee.dept_id.in_(dept_ids))
         if trip_type:
@@ -357,11 +365,12 @@ async def get_trip_daily_count(
             .where(
                 TripRecord.work_date >= month_start,
                 TripRecord.work_date < month_end,
+                TripRecord.duration_hours > 0,
             )
             .group_by(TripRecord.work_date)
         )
 
-        if dept_id:
+        if dept_id is not None:
             dept_ids = await get_descendant_dept_ids(session, dept_id)
             query = query.where(Employee.dept_id.in_(dept_ids))
         if trip_type:

@@ -1,5 +1,6 @@
-import { ref, reactive, computed, watch } from 'vue'
-import api from '../api/index.js'
+import { ref, reactive, computed, watch, getCurrentScope, onScopeDispose } from 'vue'
+import api, { waitForSyncCompletion } from '../api/index.js'
+import { businessDate, businessDateParts } from '../utils/date.js'
 
 /**
  * Mock data generator for development when backend is not available.
@@ -186,7 +187,7 @@ const USE_MOCK = false
  */
 export function useLeaveData() {
   // --- Filter state ---
-  const currentYear = new Date().getFullYear()
+  const currentYear = businessDateParts().year
   const filters = reactive({
     year: currentYear,
     deptId: null,       // Level 1 department ID
@@ -203,6 +204,10 @@ export function useLeaveData() {
 
   // --- Leave type options (dynamic from API) ---
   const leaveTypeOptions = ref([])
+  const leaveTypesReady = ref(false)
+  const leaveTypeError = ref('')
+  const selectedLeaveTypes = () => leaveTypesReady.value && filters.leaveTypes != null ? [...filters.leaveTypes] : null
+  const requestVersion = { data: 0, daily: 0, today: 0, detail: 0, calendar: 0, departments: 0 }
 
   // --- Table data ---
   const tableData = ref([])
@@ -228,6 +233,7 @@ export function useLeaveData() {
 
   // --- Loading state ---
   const loading = ref(false)
+  const errorMessage = ref('')
 
   // --- Calendar modal state ---
   const calendarVisible = ref(false)
@@ -242,7 +248,7 @@ export function useLeaveData() {
   })
 
   // --- Daily leave count state ---
-  const dailyLeaveMonth = ref(new Date().getMonth() + 1)
+  const dailyLeaveMonth = ref(businessDateParts().month)
   const dailyLeaveData = ref(null)
   const dailyLeaveLoading = ref(false)
   const todayLeaveCount = ref(0)
@@ -251,11 +257,23 @@ export function useLeaveData() {
   const todayLeaveVisible = ref(false)
   const todayLeaveDetail = ref(null)
   const todayLeaveLoading = ref(false)
-  const todayLeaveDate = ref(new Date().toISOString().slice(0, 10))
+  const todayLeaveDate = ref(businessDate())
 
   // --- Sync state ---
   const syncing = ref(false)
   const syncMessage = ref('')
+  const syncStatus = ref(null)
+  let syncVersion = 0
+  let syncController
+  if (getCurrentScope()) onScopeDispose(() => { syncVersion++; syncController?.abort() })
+
+  watch(filters, () => {
+    for (const key of ['data', 'daily', 'today', 'detail', 'calendar']) requestVersion[key]++
+    loading.value = false
+    dailyLeaveLoading.value = false
+    todayLeaveLoading.value = false
+    calendarLoading.value = false
+  }, { deep: true, flush: 'sync' })
 
   // --- Year options (recent 5 years) ---
   const yearOptions = computed(() => {
@@ -280,7 +298,7 @@ export function useLeaveData() {
       }
     } catch (e) {
       console.error('Failed to load departments:', e)
-      departments1.value = generateMockDepartments(1)
+      departments1.value = USE_MOCK ? generateMockDepartments(1) : []
     } finally {
       deptsLoading.value = false
     }
@@ -290,8 +308,10 @@ export function useLeaveData() {
    * Load level-2 departments by parent ID
    */
   async function loadDepartments2(parentId) {
+    const version = ++requestVersion.departments
     if (!parentId) {
       departments2.value = []
+      deptsLoading.value = false
       return
     }
     deptsLoading.value = true
@@ -300,13 +320,15 @@ export function useLeaveData() {
         departments2.value = generateMockDepartments(parentId)
       } else {
         const data = await api.getDepartments(parentId)
+        if (version !== requestVersion.departments) return
         departments2.value = data
       }
     } catch (e) {
+      if (version !== requestVersion.departments) return
       console.error('Failed to load sub-departments:', e)
-      departments2.value = generateMockDepartments(parentId)
+      departments2.value = USE_MOCK ? generateMockDepartments(parentId) : []
     } finally {
-      deptsLoading.value = false
+      if (version === requestVersion.departments) deptsLoading.value = false
     }
   }
 
@@ -330,6 +352,7 @@ export function useLeaveData() {
    * Load leave types from API and set default filters
    */
   async function loadLeaveTypes() {
+    leaveTypeError.value = ''
     try {
       if (USE_MOCK) {
         leaveTypeOptions.value = [
@@ -355,28 +378,26 @@ export function useLeaveData() {
       filters.leaveTypes = leaveTypeOptions.value.map(t => t.name)
     } catch (e) {
       console.error('Failed to load leave types:', e)
-      // Fallback to known types
-      leaveTypeOptions.value = [
-        { name: '年假', ...knownTypeColors['年假'] },
-        { name: '事假', ...knownTypeColors['事假'] },
-        { name: '病假', ...knownTypeColors['病假'] },
-        { name: '调休', ...knownTypeColors['调休'] }
-      ]
-      filters.leaveTypes = leaveTypeOptions.value.map(t => t.name)
+      leaveTypeOptions.value = []
+      leaveTypeError.value = '请假类型加载失败，请刷新重试'
+      return
     }
+    leaveTypesReady.value = true
   }
 
   /**
    * Fetch monthly summary data based on current filters
    */
   async function fetchData() {
+    const version = ++requestVersion.data
     loading.value = true
+    errorMessage.value = ''
     try {
       const effectiveDeptId = filters.deptId2 || filters.deptId
       const params = {
         year: filters.year,
         deptId: effectiveDeptId,
-        leaveTypes: filters.leaveTypes,
+        leaveTypes: selectedLeaveTypes(),
         employeeName: filters.employeeName,
         unit: filters.unit,
         page: pagination.page,
@@ -394,35 +415,34 @@ export function useLeaveData() {
         data = await api.getMonthlySummary(params)
       }
 
+      if (version !== requestVersion.data) return
       stats.value = data.stats
       tableData.value = data.list
       summaryRow.value = data.summary
       pagination.total = data.pagination.total
     } catch (e) {
+      if (version !== requestVersion.data) return
       console.error('Failed to fetch leave data:', e)
-      // Fallback to mock data on error
-      const mockData = generateMockData(
-        { ...filters, page: pagination.page, pageSize: pagination.pageSize },
-        pagination.page,
-        pagination.pageSize
-      )
-      stats.value = mockData.stats
-      tableData.value = mockData.list
-      summaryRow.value = mockData.summary
-      pagination.total = mockData.pagination.total
+      errorMessage.value = '请假数据加载失败，请重试'
+      tableData.value = []
+      summaryRow.value = null
+      stats.value = { totalCount: 0, totalDays: 0, avgDays: 0, annualRatio: 0, annualDays: 0 }
+      pagination.total = 0
     } finally {
-      loading.value = false
+      if (version === requestVersion.data) loading.value = false
     }
 
     // Also refresh daily leave count + today count
-    fetchDailyLeaveCount()
-    fetchTodayLeaveCount()
+    if (version === requestVersion.data) {
+      await Promise.all([fetchDailyLeaveCount(), fetchTodayLeaveCount()])
+    }
   }
 
   /**
    * Fetch daily leave count (per-day headcount) for the selected month
    */
   async function fetchDailyLeaveCount() {
+    const version = ++requestVersion.daily
     dailyLeaveLoading.value = true
     try {
       const effectiveDeptId = filters.deptId2 || filters.deptId
@@ -430,7 +450,7 @@ export function useLeaveData() {
         year: filters.year,
         month: dailyLeaveMonth.value,
         deptId: effectiveDeptId,
-        leaveTypes: filters.leaveTypes,
+        leaveTypes: selectedLeaveTypes(),
         employeeName: filters.employeeName
       }
 
@@ -457,13 +477,16 @@ export function useLeaveData() {
           : 0
         dailyLeaveData.value = { todayCount, days: mockDays, maxCount }
       } else {
-        dailyLeaveData.value = await api.getDailyLeaveCount(params)
+        const data = await api.getDailyLeaveCount(params)
+        if (version !== requestVersion.daily) return
+        dailyLeaveData.value = data
       }
     } catch (e) {
+      if (version !== requestVersion.daily) return
       console.error('Failed to fetch daily leave count:', e)
       dailyLeaveData.value = null
     } finally {
-      dailyLeaveLoading.value = false
+      if (version === requestVersion.daily) dailyLeaveLoading.value = false
     }
   }
 
@@ -479,26 +502,28 @@ export function useLeaveData() {
    * Fetch today's leave count independently (always uses current date, not affected by month selector)
    */
   async function fetchTodayLeaveCount() {
-    const now = new Date()
-    const todayYear = now.getFullYear()
-    const todayMonth = now.getMonth() + 1
+    const version = ++requestVersion.today
+    const { year: todayYear, month: todayMonth } = businessDateParts()
     try {
       const effectiveDeptId = filters.deptId2 || filters.deptId
       const params = {
         year: todayYear,
         month: todayMonth,
         deptId: effectiveDeptId,
-        leaveTypes: filters.leaveTypes,
+        leaveTypes: selectedLeaveTypes(),
         employeeName: filters.employeeName
       }
       if (USE_MOCK) {
         todayLeaveCount.value = Math.floor(Math.random() * 10)
       } else {
         const result = await api.getDailyLeaveCount(params)
+        if (version !== requestVersion.today) return
         todayLeaveCount.value = result.todayCount ?? 0
       }
     } catch (e) {
+      if (version !== requestVersion.today) return
       console.error('Failed to fetch today leave count:', e)
+      todayLeaveCount.value = 0
     }
   }
 
@@ -506,19 +531,17 @@ export function useLeaveData() {
    * Fetch leave detail for the modal (supports any date)
    */
   async function fetchTodayLeaveDetail(date) {
-    if (todayLeaveLoading.value) return
+    const version = ++requestVersion.detail
     todayLeaveLoading.value = true
     todayLeaveVisible.value = true
 
-    if (date) {
-      todayLeaveDate.value = date
-    }
+    todayLeaveDate.value = typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : businessDate()
 
     try {
       const effectiveDeptId = filters.deptId2 || filters.deptId
       const params = {
         deptId: effectiveDeptId,
-        leaveTypes: filters.leaveTypes,
+        leaveTypes: selectedLeaveTypes(),
         employeeName: filters.employeeName,
         date: todayLeaveDate.value
       }
@@ -535,13 +558,16 @@ export function useLeaveData() {
           ]
         }
       } else {
-        todayLeaveDetail.value = await api.getTodayLeaveDetail(params)
+        const data = await api.getTodayLeaveDetail(params)
+        if (version !== requestVersion.detail) return
+        todayLeaveDetail.value = data
       }
     } catch (e) {
+      if (version !== requestVersion.detail) return
       console.error('Failed to fetch leave detail:', e)
       todayLeaveDetail.value = null
     } finally {
-      todayLeaveLoading.value = false
+      if (version === requestVersion.detail) todayLeaveLoading.value = false
     }
   }
 
@@ -553,7 +579,7 @@ export function useLeaveData() {
       const effectiveDeptId = filters.deptId2 || filters.deptId
       const params = {
         deptId: effectiveDeptId,
-        leaveTypes: filters.leaveTypes,
+        leaveTypes: selectedLeaveTypes(),
         employeeName: filters.employeeName,
         date: todayLeaveDate.value
       }
@@ -569,15 +595,18 @@ export function useLeaveData() {
    * Close the today leave detail modal
    */
   function closeTodayLeave() {
+    requestVersion.detail++
+    todayLeaveLoading.value = false
     todayLeaveVisible.value = false
     todayLeaveDetail.value = null
-    todayLeaveDate.value = new Date().toISOString().slice(0, 10)
+    todayLeaveDate.value = businessDate()
   }
 
   /**
    * Fetch daily detail for the calendar modal
    */
   async function fetchDailyDetail(employeeId, name, dept, year, month) {
+    const version = ++requestVersion.calendar
     calendarLoading.value = true
     calendarVisible.value = true
     selectedCell.employeeId = employeeId
@@ -592,14 +621,16 @@ export function useLeaveData() {
         await new Promise(resolve => setTimeout(resolve, 200))
         data = generateMockDailyDetail(employeeId, year, month)
       } else {
-        data = await api.getDailyDetail(employeeId, year, month)
+        data = await api.getDailyDetail(employeeId, year, month, selectedLeaveTypes())
       }
+      if (version !== requestVersion.calendar) return
       calendarData.value = data
     } catch (e) {
+      if (version !== requestVersion.calendar) return
       console.error('Failed to fetch daily detail:', e)
-      calendarData.value = generateMockDailyDetail(employeeId, year, month)
+      calendarData.value = null
     } finally {
-      calendarLoading.value = false
+      if (version === requestVersion.calendar) calendarLoading.value = false
     }
   }
 
@@ -607,6 +638,8 @@ export function useLeaveData() {
    * Close the calendar modal
    */
   function closeCalendar() {
+    requestVersion.calendar++
+    calendarLoading.value = false
     calendarVisible.value = false
     calendarData.value = null
   }
@@ -682,43 +715,70 @@ export function useLeaveData() {
   /**
    * Trigger data sync from DingTalk
    */
-  async function triggerSync(year) {
+  function applySyncStatus(status) {
+    syncStatus.value = status
+  }
+
+  function beginSyncObservation() {
+    syncController?.abort()
+    syncController = new AbortController()
+    const version = ++syncVersion
+    return {
+      version, signal: syncController.signal,
+      onStatus: status => { if (version === syncVersion) applySyncStatus(status) }
+    }
+  }
+
+  async function refreshSyncStatus() {
     if (syncing.value) return
+    const { version, signal, onStatus } = beginSyncObservation()
+    try {
+      const status = await api.getSyncStatus(signal)
+      if (version !== syncVersion) return
+      applySyncStatus(status)
+      syncing.value = Boolean(status.running?.full)
+      if (status.running?.full) {
+        const latest = await waitForSyncCompletion('full', null, onStatus, signal)
+        if (version !== syncVersion) return
+        syncMessage.value = latest.status === 'success' ? '同步完成' : `同步${latest.status === 'partial' ? '部分完成' : '失败'}: ${latest.message || ''}`
+        await fetchData()
+      }
+    } catch (e) {
+      if (version !== syncVersion) return
+      syncMessage.value = '同步状态查询失败，任务状态未知，请刷新重试'
+    } finally {
+      if (version === syncVersion) syncing.value = false
+    }
+  }
+
+  async function triggerSync(year) {
+    if (syncing.value) return false
+    const { version, signal, onStatus } = beginSyncObservation()
     syncing.value = true
     syncMessage.value = ''
-
     try {
-      if (USE_MOCK) {
-        await new Promise(resolve => setTimeout(resolve, 2000))
-        syncMessage.value = '同步完成'
-      } else {
-        await api.triggerSync(year)
-        // Poll sync status - response is { logs: [...] }
-        let attempts = 0
-        const maxAttempts = 60
-        while (attempts < maxAttempts) {
-          await new Promise(resolve => setTimeout(resolve, 2000))
-          const result = await api.getSyncStatus()
-          const logs = result.logs || []
-          // Find the most recent "full" sync log entry
-          const latest = logs.find(log => log.sync_type === 'full') || logs[0]
-          if (latest && latest.status === 'success') {
-            syncMessage.value = '同步完成'
-            break
-          } else if (latest && latest.status === 'failed') {
-            syncMessage.value = '同步失败: ' + (latest.message || '')
-            break
-          }
-          attempts++
-        }
+      const before = await api.getSyncStatus(signal)
+      if (version !== syncVersion) return false
+      syncStatus.value = before
+      const result = await api.triggerSync(year)
+      if (version !== syncVersion) return false
+      if (result.success === false && result.taskId == null) {
+        syncMessage.value = result.message || '同步未启动'
+        return false
       }
-      // Refresh data after sync
-      fetchData()
+      syncMessage.value = result.success === false ? '后台正在同步，请稍候' : '同步中...'
+      const latest = await waitForSyncCompletion('full', before.latest?.full?.id || 0, onStatus, signal, result.taskId)
+      if (version !== syncVersion) return false
+      syncMessage.value = latest.status === 'success' ? '同步完成' : `同步${latest.status === 'partial' ? '部分完成' : '失败'}: ${latest.message || ''}`
+      await fetchData()
+      return latest.status === 'success'
     } catch (e) {
+      if (version !== syncVersion) return false
       console.error('Sync failed:', e)
-      syncMessage.value = '同步请求失败'
+      syncMessage.value = '同步请求或状态查询失败，任务状态未知，请刷新重试'
+      return false
     } finally {
-      syncing.value = false
+      if (version === syncVersion) syncing.value = false
     }
   }
 
@@ -731,7 +791,7 @@ export function useLeaveData() {
       const params = {
         year: filters.year,
         deptId: effectiveDeptId,
-        leaveTypes: filters.leaveTypes,
+        leaveTypes: selectedLeaveTypes(),
         employeeName: filters.employeeName,
         unit: filters.unit
       }
@@ -783,6 +843,8 @@ export function useLeaveData() {
     todayLeaveDate,
     syncing,
     syncMessage,
+    syncStatus,
+    errorMessage: computed(() => [leaveTypeError.value, errorMessage.value].filter(Boolean).join('；')),
     yearOptions,
 
     // Methods
@@ -801,6 +863,7 @@ export function useLeaveData() {
     toggleSort,
     setUnit,
     triggerSync,
+    refreshSyncStatus,
     exportExcel,
     fetchTodayLeaveDetail,
     exportLeaveDetail,

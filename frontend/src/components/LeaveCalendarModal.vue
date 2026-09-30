@@ -138,14 +138,14 @@ function formatDate(dateStr) {
  * Format duration hours to a readable string
  */
 function formatDuration(hours) {
+  const displayHours = Number(hours.toFixed(2))
   if (hours >= 8) {
-    const days = Math.round(hours / 8 * 10) / 10
-    return `全天 \u00B7 ${hours}小时`
+    return `全天 \u00B7 ${displayHours}小时`
   }
   if (hours >= 4) {
-    return `半天 \u00B7 ${hours}小时`
+    return `半天 \u00B7 ${displayHours}小时`
   }
-  return `${hours}小时`
+  return `${displayHours}小时`
 }
 
 /**

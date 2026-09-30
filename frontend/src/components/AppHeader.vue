@@ -1,12 +1,15 @@
 <script setup>
 import { CalendarDays, RefreshCw, Download, LogOut, Shield, FileSpreadsheet, BarChart3, Briefcase } from 'lucide-vue-next'
+import { businessDateParts } from '../utils/date.js'
 
 const props = defineProps({
   syncing: { type: Boolean, default: false },
   exporting: { type: Boolean, default: false },
   tripSyncing: { type: Boolean, default: false },
   tripExporting: { type: Boolean, default: false },
-  syncYear: { type: Number, default: new Date().getFullYear() },
+  syncYear: { type: Number, default: () => businessDateParts().year },
+  syncMessage: { type: String, default: '' },
+  tripSyncMessage: { type: String, default: '' },
   activePage: { type: String, default: 'export' },
   currentUser: { type: Object, default: null },
   isAdmin: { type: Boolean, default: false }
@@ -71,6 +74,7 @@ const emit = defineEmits(['sync', 'export', 'trip-sync', 'trip-export', 'page-ch
         v-if="activePage === 'export' && isAdmin"
         class="flex items-center gap-2 px-3 lg:px-4 py-2 text-sm font-medium text-text-secondary border border-border-default rounded-lg hover:bg-surface transition-colors"
         :disabled="syncing"
+        :title="syncMessage || '同步请假数据'"
         @click="emit('sync')"
       >
         <RefreshCw :size="16" :class="{ 'animate-spin': syncing }" />
@@ -91,6 +95,7 @@ const emit = defineEmits(['sync', 'export', 'trip-sync', 'trip-export', 'page-ch
         v-if="activePage === 'trip' && isAdmin"
         class="flex items-center gap-2 px-3 lg:px-4 py-2 text-sm font-medium text-text-secondary border border-border-default rounded-lg hover:bg-surface transition-colors"
         :disabled="tripSyncing"
+        :title="tripSyncMessage || '同步外出/出差数据'"
         @click="emit('trip-sync')"
       >
         <RefreshCw :size="16" :class="{ 'animate-spin': tripSyncing }" />
@@ -152,6 +157,8 @@ const emit = defineEmits(['sync', 'export', 'trip-sync', 'trip-export', 'page-ch
         class="p-2 rounded-lg transition-colors"
         :class="syncing ? 'text-accent' : 'text-text-tertiary active:bg-gray-100'"
         :disabled="syncing"
+        :title="syncMessage || '同步请假数据'"
+        aria-label="同步请假数据"
         @click="emit('sync')"
       >
         <RefreshCw :size="18" :class="{ 'animate-spin': syncing }" />
@@ -161,6 +168,27 @@ const emit = defineEmits(['sync', 'export', 'trip-sync', 'trip-export', 'page-ch
         class="p-2 text-white bg-accent rounded-lg active:bg-blue-700 transition-colors"
         :disabled="exporting"
         @click="emit('export')"
+      >
+        <Download :size="18" />
+      </button>
+      <button
+        v-if="activePage === 'trip' && isAdmin"
+        class="p-2 rounded-lg transition-colors"
+        :class="tripSyncing ? 'text-accent' : 'text-text-tertiary active:bg-gray-100'"
+        :disabled="tripSyncing"
+        :title="tripSyncMessage || '同步外出/出差数据'"
+        aria-label="同步外出/出差数据"
+        @click="emit('trip-sync')"
+      >
+        <RefreshCw :size="18" :class="{ 'animate-spin': tripSyncing }" />
+      </button>
+      <button
+        v-if="activePage === 'trip'"
+        class="p-2 text-white bg-accent rounded-lg active:bg-blue-700 transition-colors"
+        :disabled="tripExporting"
+        title="导出 Excel"
+        aria-label="导出外出/出差 Excel"
+        @click="emit('trip-export')"
       >
         <Download :size="18" />
       </button>
